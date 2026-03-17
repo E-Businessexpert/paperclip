@@ -298,7 +298,7 @@ export function Layout() {
                   <span className="truncate">Documentation</span>
                 </a>
                 {health?.version && (
-                  <span className="px-2 text-xs text-muted-foreground shrink-0">v{health.version}</span>
+                  <span className="px-2 text-xs text-muted-foreground shrink-0" title={`v${health.version}`}>v</span>
                 )}
                 <Button variant="ghost" size="icon-sm" className="text-muted-foreground shrink-0" asChild>
                   <Link
@@ -351,7 +351,7 @@ export function Layout() {
                   <span className="truncate">Documentation</span>
                 </a>
                 {health?.version && (
-                  <span className="px-2 text-xs text-muted-foreground shrink-0">v{health.version}</span>
+                  <span className="px-2 text-xs text-muted-foreground shrink-0" title={`v${health.version}`}>v</span>
                 )}
                 <Button variant="ghost" size="icon-sm" className="text-muted-foreground shrink-0" asChild>
                   <Link
