@@ -106,7 +106,19 @@ Notes:
 - `packages/db/drizzle.config.ts` reads compiled schema from `dist/schema/*.js`
 - `pnpm db:generate` compiles `packages/db` first
 
-## 7. Verification Before Hand-off
+## 7. Verification
+
+### Before Every Commit
+
+Run the relevant tests locally before committing any code change:
+
+```sh
+pnpm test:run
+```
+
+Do not commit changes you have not verified with tests. Do not commit changes you do not understand.
+
+### Before Hand-off
 
 Run this full check before claiming done:
 
