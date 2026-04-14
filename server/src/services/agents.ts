@@ -15,6 +15,7 @@ import {
   issueExecutionDecisions,
   issues,
   issueComments,
+  companies,
 } from "@paperclipai/db";
 import { isUuidLike, normalizeAgentUrlKey } from "@paperclipai/shared";
 import { conflict, notFound, unprocessable } from "../errors.js";
@@ -231,14 +232,50 @@ export function agentService(db: Db) {
     return new Map(rows.map((row) => [row.agentId, Number(row.spentMonthlyCents ?? 0)]));
   }
 
-  async function hydrateAgentSpend<T extends { id: string; companyId: string; spentMonthlyCents: number }>(rows: T[]) {
-    const agentIds = rows.map((row) => row.id);
-    const companyId = rows[0]?.companyId;
-    if (!companyId || agentIds.length === 0) return rows;
-    const spendByAgentId = await getMonthlySpendByAgentIds(companyId, agentIds);
+  async function getCompanyNamesByIds(companyIds: string[]) {
+    const uniqueCompanyIds = Array.from(new Set(companyIds.filter(Boolean)));
+    if (uniqueCompanyIds.length === 0) return new Map<string, string>();
+
+    const rows = await db
+      .select({
+        id: companies.id,
+        name: companies.name,
+      })
+      .from(companies)
+      .where(inArray(companies.id, uniqueCompanyIds));
+
+    return new Map(rows.map((row) => [row.id, row.name]));
+  }
+
+  async function attachCompanyNames<T extends { companyId: string }>(rows: T[]) {
+    const companyNames = await getCompanyNamesByIds(rows.map((row) => row.companyId));
     return rows.map((row) => ({
       ...row,
-      spentMonthlyCents: spendByAgentId.get(row.id) ?? 0,
+      companyName: companyNames.get(row.companyId) ?? null,
+    }));
+  }
+
+  async function hydrateAgentSpend<T extends { id: string; companyId: string; spentMonthlyCents: number }>(rows: T[]) {
+    if (rows.length === 0) return rows;
+
+    const agentIdsByCompany = new Map<string, string[]>();
+    for (const row of rows) {
+      const group = agentIdsByCompany.get(row.companyId) ?? [];
+      group.push(row.id);
+      agentIdsByCompany.set(row.companyId, group);
+    }
+
+    const spendEntries = await Promise.all(
+      Array.from(agentIdsByCompany.entries()).map(async ([companyId, agentIds]) => [
+        companyId,
+        await getMonthlySpendByAgentIds(companyId, agentIds),
+      ] as const),
+    );
+    const spendByCompanyId = new Map(spendEntries);
+
+    return rows.map((row) => ({
+      ...row,
+      spentMonthlyCents: spendByCompanyId.get(row.companyId)?.get(row.id) ?? 0,
     }));
   }
 
@@ -253,12 +290,9 @@ export function agentService(db: Db) {
     return normalizeAgentRow(hydrated);
   }
 
-  async function ensureManager(companyId: string, managerId: string) {
+  async function ensureManager(_companyId: string, managerId: string) {
     const manager = await getById(managerId);
     if (!manager) throw notFound("Manager not found");
-    if (manager.companyId !== companyId) {
-      throw unprocessable("Manager must belong to same company");
-    }
     return manager;
   }
 
@@ -381,6 +415,32 @@ export function agentService(db: Db) {
       const rows = await db.select().from(agents).where(and(...conditions));
       const hydrated = await hydrateAgentSpend(rows);
       return hydrated.map(normalizeAgentRow);
+    },
+
+    listVisible: async (companyIds: string[] | null, options?: { includeTerminated?: boolean }) => {
+      if (companyIds && companyIds.length === 0) return [];
+
+      const conditions = [];
+      if (companyIds) {
+        conditions.push(inArray(agents.companyId, companyIds));
+      }
+      if (!options?.includeTerminated) {
+        conditions.push(ne(agents.status, "terminated"));
+      }
+
+      const whereClause =
+        conditions.length === 0
+          ? undefined
+          : conditions.length === 1
+            ? conditions[0]
+            : and(...conditions);
+
+      const rows = whereClause
+        ? await db.select().from(agents).where(whereClause)
+        : await db.select().from(agents);
+      const hydrated = await hydrateAgentSpend(rows);
+      const normalized = hydrated.map(normalizeAgentRow);
+      return attachCompanyNames(normalized);
     },
 
     getById,
@@ -628,33 +688,96 @@ export function agentService(db: Db) {
       return rows[0] ?? null;
     },
 
-    orgForCompany: async (companyId: string) => {
-      const rows = await db
-        .select()
-        .from(agents)
-        .where(and(eq(agents.companyId, companyId), ne(agents.status, "terminated")));
-      const normalizedRows = rows.map(normalizeAgentRow);
-      const byManager = new Map<string | null, typeof normalizedRows>();
+    orgForCompany: async (companyId: string, visibleCompanyIds: string[] | null = null) => {
+      const rows = await (async () => {
+        if (visibleCompanyIds && visibleCompanyIds.length === 0) return [];
+        const conditions = [ne(agents.status, "terminated")];
+        if (visibleCompanyIds) {
+          conditions.push(inArray(agents.companyId, visibleCompanyIds));
+        }
+        return db.select().from(agents).where(and(...conditions));
+      })();
+      const hydratedRows = await hydrateAgentSpend(rows);
+      const normalizedRows = await attachCompanyNames(hydratedRows.map(normalizeAgentRow));
+      const byId = new Map(normalizedRows.map((row) => [row.id, row]));
+      const childrenByManager = new Map<string, Array<(typeof normalizedRows)[number]>>();
+
       for (const row of normalizedRows) {
-        const key = row.reportsTo ?? null;
-        const group = byManager.get(key) ?? [];
-        group.push(row);
-        byManager.set(key, group);
+        if (!row.reportsTo || !byId.has(row.reportsTo)) continue;
+        const children = childrenByManager.get(row.reportsTo) ?? [];
+        children.push(row);
+        childrenByManager.set(row.reportsTo, children);
       }
 
-      const build = (managerId: string | null): Array<Record<string, unknown>> => {
-        const members = byManager.get(managerId) ?? [];
-        return members.map((member) => ({
+      const seedIds = normalizedRows
+        .filter((row) => row.companyId === companyId)
+        .map((row) => row.id);
+      if (seedIds.length === 0) return [];
+
+      const includedIds = new Set<string>();
+
+      for (const seedId of seedIds) {
+        let cursorId: string | null = seedId;
+        while (cursorId) {
+          const current = byId.get(cursorId);
+          if (!current) break;
+          if (includedIds.has(current.id)) {
+            cursorId = current.reportsTo ?? null;
+            continue;
+          }
+          includedIds.add(current.id);
+          cursorId = current.reportsTo ?? null;
+        }
+      }
+
+      const queue = [...seedIds];
+      while (queue.length > 0) {
+        const currentId = queue.shift();
+        if (!currentId) continue;
+        includedIds.add(currentId);
+        for (const child of childrenByManager.get(currentId) ?? []) {
+          if (includedIds.has(child.id)) continue;
+          includedIds.add(child.id);
+          queue.push(child.id);
+        }
+      }
+
+      const includedRows = normalizedRows.filter((row) => includedIds.has(row.id));
+      const sortRows = (left: (typeof includedRows)[number], right: (typeof includedRows)[number]) =>
+        left.name.localeCompare(right.name);
+
+      const build = (memberId: string): Record<string, unknown> => {
+        const member = byId.get(memberId);
+        if (!member) {
+          throw notFound("Agent not found while building org chart");
+        }
+        const children = (childrenByManager.get(memberId) ?? [])
+          .filter((child) => includedIds.has(child.id))
+          .sort(sortRows)
+          .map((child) => build(child.id));
+
+        return {
           ...member,
-          reports: build(member.id),
-        }));
+          companyName: member.companyName,
+          externalToCompany: member.companyId !== companyId,
+          reports: children,
+        };
       };
 
-      return build(null);
+      return includedRows
+        .filter((row) => !row.reportsTo || !includedIds.has(row.reportsTo))
+        .sort(sortRows)
+        .map((row) => build(row.id));
     },
 
     getChainOfCommand: async (agentId: string) => {
-      const chain: { id: string; name: string; role: string; title: string | null }[] = [];
+      const chain: {
+        id: string;
+        companyId: string;
+        name: string;
+        role: string;
+        title: string | null;
+      }[] = [];
       const visited = new Set<string>([agentId]);
       const start = await getById(agentId);
       let currentId = start?.reportsTo ?? null;
@@ -662,10 +785,24 @@ export function agentService(db: Db) {
         visited.add(currentId);
         const mgr = await getById(currentId);
         if (!mgr) break;
-        chain.push({ id: mgr.id, name: mgr.name, role: mgr.role, title: mgr.title ?? null });
+        chain.push({
+          id: mgr.id,
+          companyId: mgr.companyId,
+          name: mgr.name,
+          role: mgr.role,
+          title: mgr.title ?? null,
+        });
         currentId = mgr.reportsTo ?? null;
       }
-      return chain;
+      const companyNames = await getCompanyNamesByIds(chain.map((entry) => entry.companyId));
+      return chain.map((entry) => ({
+        id: entry.id,
+        companyId: entry.companyId,
+        companyName: companyNames.get(entry.companyId) ?? null,
+        name: entry.name,
+        role: entry.role,
+        title: entry.title,
+      }));
     },
 
     runningForAgent: (agentId: string) =>

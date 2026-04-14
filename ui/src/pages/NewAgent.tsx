@@ -73,6 +73,20 @@ export function NewAgent() {
     enabled: !!selectedCompanyId,
   });
 
+  const { data: managerCandidates = [] } = useQuery({
+    queryKey: selectedCompanyId
+      ? [...queryKeys.agents.listGlobal, selectedCompanyId, "new-agent-manager-candidates"]
+      : ["agents", "none", "new-agent-manager-candidates"],
+    queryFn: async () => {
+      try {
+        return await agentsApi.listGlobal();
+      } catch {
+        return selectedCompanyId ? await agentsApi.list(selectedCompanyId) : [];
+      }
+    },
+    enabled: !!selectedCompanyId,
+  });
+
   const {
     data: adapterModels,
     error: adapterModelsError,
@@ -124,6 +138,7 @@ export function NewAgent() {
       agentsApi.hire(selectedCompanyId!, data),
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(selectedCompanyId!) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.listGlobal });
       queryClient.invalidateQueries({ queryKey: queryKeys.approvals.list(selectedCompanyId!) });
       navigate(agentUrl(result.agent));
     },
@@ -258,10 +273,11 @@ export function NewAgent() {
           </Popover>
 
           <ReportsToPicker
-            agents={agents ?? []}
+            agents={managerCandidates.length > 0 ? managerCandidates : (agents ?? [])}
             value={reportsTo}
             onChange={setReportsTo}
             disabled={isFirstAgent}
+            referenceCompanyId={selectedCompanyId ?? null}
           />
         </div>
 

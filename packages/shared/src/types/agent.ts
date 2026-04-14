@@ -54,6 +54,8 @@ export interface AgentAccessState {
 
 export interface AgentChainOfCommandEntry {
   id: string;
+  companyId: string;
+  companyName: string | null;
   name: string;
   role: AgentRole;
   title: string | null;

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { Link, useNavigate } from "@/lib/router";
 import { useQuery } from "@tanstack/react-query";
-import { agentsApi, type OrgNode } from "../api/agents";
+import { agentsApi, type AgentDirectoryEntry, type OrgNode } from "../api/agents";
 import { useCompany } from "../context/CompanyContext";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
 import { queryKeys } from "../lib/queryKeys";
@@ -11,7 +11,7 @@ import { EmptyState } from "../components/EmptyState";
 import { PageSkeleton } from "../components/PageSkeleton";
 import { AgentIcon } from "../components/AgentIconPicker";
 import { Download, Network, Upload } from "lucide-react";
-import { AGENT_ROLE_LABELS, type Agent } from "@paperclipai/shared";
+import { AGENT_ROLE_LABELS } from "@paperclipai/shared";
 
 // Layout constants
 const CARD_W = 200;
@@ -27,6 +27,9 @@ interface LayoutNode {
   name: string;
   role: string;
   status: string;
+  companyId?: string;
+  companyName?: string | null;
+  externalToCompany?: boolean;
   x: number;
   y: number;
   children: LayoutNode[];
@@ -64,6 +67,9 @@ function layoutTree(node: OrgNode, x: number, y: number): LayoutNode {
     name: node.name,
     role: node.role,
     status: node.status,
+    companyId: node.companyId,
+    companyName: node.companyName,
+    externalToCompany: node.externalToCompany,
     x: x + (totalW - CARD_W) / 2,
     y,
     children: layoutChildren,
@@ -142,13 +148,21 @@ export function OrgChart() {
   });
 
   const { data: agents } = useQuery({
-    queryKey: queryKeys.agents.list(selectedCompanyId!),
-    queryFn: () => agentsApi.list(selectedCompanyId!),
+    queryKey: selectedCompanyId
+      ? [...queryKeys.agents.listGlobal, selectedCompanyId, "org-chart-agent-directory"]
+      : ["agents", "none", "org-chart-agent-directory"],
+    queryFn: async () => {
+      try {
+        return await agentsApi.listGlobal();
+      } catch {
+        return selectedCompanyId ? await agentsApi.list(selectedCompanyId) : [];
+      }
+    },
     enabled: !!selectedCompanyId,
   });
 
   const agentMap = useMemo(() => {
-    const m = new Map<string, Agent>();
+    const m = new Map<string, AgentDirectoryEntry>();
     for (const a of agents ?? []) m.set(a.id, a);
     return m;
   }, [agents]);
@@ -414,6 +428,11 @@ export function OrgChart() {
                   <span className="text-[11px] text-muted-foreground leading-tight mt-0.5">
                     {agent?.title ?? roleLabel(node.role)}
                   </span>
+                  {node.externalToCompany ? (
+                    <span className="text-[10px] text-muted-foreground/80 leading-tight mt-1">
+                      {node.companyName ?? agent?.companyName ?? "External company"}
+                    </span>
+                  ) : null}
                   {agent && (
                     <span className="text-[10px] text-muted-foreground/60 font-mono leading-tight mt-1">
                       {getAdapterLabel(agent.adapterType)}

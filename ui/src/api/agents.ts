@@ -44,11 +44,18 @@ export interface ClaudeLoginResult {
   stderr: string;
 }
 
+export interface AgentDirectoryEntry extends Agent {
+  companyName?: string | null;
+}
+
 export interface OrgNode {
   id: string;
   name: string;
   role: string;
   status: string;
+  companyId?: string;
+  companyName?: string | null;
+  externalToCompany?: boolean;
   reports: OrgNode[];
 }
 
@@ -74,6 +81,7 @@ function agentPath(id: string, companyId?: string, suffix = "") {
 
 export const agentsApi = {
   list: (companyId: string) => api.get<Agent[]>(`/companies/${companyId}/agents`),
+  listGlobal: () => api.get<AgentDirectoryEntry[]>("/instance/agents"),
   org: (companyId: string) => api.get<OrgNode[]>(`/companies/${companyId}/org`),
   listConfigurations: (companyId: string) =>
     api.get<Record<string, unknown>[]>(`/companies/${companyId}/agent-configurations`),

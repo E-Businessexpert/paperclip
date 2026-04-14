@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   agentsApi,
   type AgentKey,
+  type AgentDirectoryEntry,
   type ClaudeLoginResult,
   type AgentPermissionUpdate,
 } from "../api/agents";
@@ -675,9 +676,17 @@ export function AgentDetail() {
     enabled: !!resolvedCompanyId && !!resolvedAgentId && needsDashboardData,
   });
 
-  const { data: allAgents } = useQuery({
-    queryKey: queryKeys.agents.list(resolvedCompanyId!),
-    queryFn: () => agentsApi.list(resolvedCompanyId!),
+  const { data: visibleAgents = [] } = useQuery<AgentDirectoryEntry[]>({
+    queryKey: resolvedCompanyId
+      ? [...queryKeys.agents.listGlobal, resolvedCompanyId, "agent-detail-relations"]
+      : ["agents", "none", "agent-detail-relations"],
+    queryFn: async () => {
+      try {
+        return await agentsApi.listGlobal();
+      } catch {
+        return resolvedCompanyId ? await agentsApi.list(resolvedCompanyId) : [];
+      }
+    },
     enabled: !!resolvedCompanyId && needsDashboardData,
   });
 
@@ -691,8 +700,8 @@ export function AgentDetail() {
 
   const assignedIssues = (allIssues ?? [])
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-  const reportsToAgent = (allAgents ?? []).find((a) => a.id === agent?.reportsTo);
-  const directReports = (allAgents ?? []).filter((a) => a.reportsTo === agent?.id && a.status !== "terminated");
+  const reportsToAgent = visibleAgents.find((a) => a.id === agent?.reportsTo);
+  const directReports = visibleAgents.filter((a) => a.reportsTo === agent?.id && a.status !== "terminated");
   const agentBudgetSummary = useMemo(() => {
     const matched = budgetOverview?.policies.find(
       (policy) => policy.scopeType === "agent" && policy.scopeId === (agent?.id ?? routeAgentRef),
@@ -774,6 +783,7 @@ export function AgentDetail() {
       setActionError(null);
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(routeAgentRef) });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agentLookupRef) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.listGlobal });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.runtimeState(agentLookupRef) });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.taskSessions(agentLookupRef) });
       if (resolvedCompanyId) {
@@ -804,6 +814,7 @@ export function AgentDetail() {
       queryClient.invalidateQueries({ queryKey: queryKeys.budgets.overview(resolvedCompanyId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(routeAgentRef) });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agentLookupRef) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.listGlobal });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(resolvedCompanyId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboard(resolvedCompanyId) });
     },
@@ -814,6 +825,7 @@ export function AgentDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(routeAgentRef) });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agentLookupRef) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.listGlobal });
       if (resolvedCompanyId) {
         queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(resolvedCompanyId) });
       }
@@ -840,6 +852,7 @@ export function AgentDetail() {
       setActionError(null);
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(routeAgentRef) });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agentLookupRef) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.listGlobal });
       if (resolvedCompanyId) {
         queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(resolvedCompanyId) });
       }
@@ -1441,6 +1454,8 @@ function AgentConfigurePage({
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agent.id) });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agent.urlKey) });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.configRevisions(agent.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.listGlobal });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(agent.companyId) });
     },
   });
 
@@ -1562,6 +1577,7 @@ function ConfigurationTab({
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agent.id) });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agent.urlKey) });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.configRevisions(agent.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.listGlobal });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(agent.companyId) });
     },
     onError: (err) => {

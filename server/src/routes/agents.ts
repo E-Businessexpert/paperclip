@@ -230,6 +230,19 @@ export function agentRoutes(db: Db) {
     return allowedByGrant || canCreateAgents(actorAgent);
   }
 
+  function getVisibleCompanyIds(req: Request): string[] | null {
+    if (req.actor.type === "agent") {
+      return req.actor.companyId ? [req.actor.companyId] : [];
+    }
+    if (req.actor.type === "board") {
+      if (req.actor.source === "local_implicit" || req.actor.isInstanceAdmin) {
+        return null;
+      }
+      return req.actor.companyIds ?? [];
+    }
+    return [];
+  }
+
   async function buildSkippedWakeupResponse(
     agent: NonNullable<Awaited<ReturnType<typeof svc.getById>>>,
     payload: Record<string, unknown> | null | undefined,
@@ -759,13 +772,23 @@ export function agentRoutes(db: Db) {
     const reports = Array.isArray(node.reports)
       ? (node.reports as Array<Record<string, unknown>>).map((report) => toLeanOrgNode(report))
       : [];
-    return {
+    const leanNode: Record<string, unknown> = {
       id: String(node.id),
       name: String(node.name),
       role: String(node.role),
       status: String(node.status),
       reports,
     };
+    if (typeof node.companyId === "string") {
+      leanNode.companyId = node.companyId;
+    }
+    if (typeof node.companyName === "string" || node.companyName === null) {
+      leanNode.companyName = node.companyName;
+    }
+    if (typeof node.externalToCompany === "boolean") {
+      leanNode.externalToCompany = node.externalToCompany;
+    }
+    return leanNode;
   }
 
   router.param("id", async (req, _res, next, rawId) => {
@@ -973,6 +996,12 @@ export function agentRoutes(db: Db) {
     res.json(result.map((agent) => redactForRestrictedAgentView(agent)));
   });
 
+  router.get("/instance/agents", async (req, res) => {
+    assertBoard(req);
+    const result = await svc.listVisible(getVisibleCompanyIds(req));
+    res.json(result);
+  });
+
   router.get("/instance/scheduler-heartbeats", async (req, res) => {
     assertInstanceAdmin(req);
 
@@ -1039,7 +1068,7 @@ export function agentRoutes(db: Db) {
   router.get("/companies/:companyId/org", async (req, res) => {
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
-    const tree = await svc.orgForCompany(companyId);
+    const tree = await svc.orgForCompany(companyId, getVisibleCompanyIds(req));
     const leanTree = tree.map((node) => toLeanOrgNode(node as Record<string, unknown>));
     res.json(leanTree);
   });
@@ -1048,7 +1077,7 @@ export function agentRoutes(db: Db) {
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
     const style = (ORG_CHART_STYLES.includes(req.query.style as OrgChartStyle) ? req.query.style : "warmth") as OrgChartStyle;
-    const tree = await svc.orgForCompany(companyId);
+    const tree = await svc.orgForCompany(companyId, getVisibleCompanyIds(req));
     const leanTree = tree.map((node) => toLeanOrgNode(node as Record<string, unknown>));
     const svg = renderOrgChartSvg(leanTree as unknown as OrgNode[], style);
     res.setHeader("Content-Type", "image/svg+xml");
@@ -1060,7 +1089,7 @@ export function agentRoutes(db: Db) {
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
     const style = (ORG_CHART_STYLES.includes(req.query.style as OrgChartStyle) ? req.query.style : "warmth") as OrgChartStyle;
-    const tree = await svc.orgForCompany(companyId);
+    const tree = await svc.orgForCompany(companyId, getVisibleCompanyIds(req));
     const leanTree = tree.map((node) => toLeanOrgNode(node as Record<string, unknown>));
     const png = await renderOrgChartPng(leanTree as unknown as OrgNode[], style);
     res.setHeader("Content-Type", "image/png");

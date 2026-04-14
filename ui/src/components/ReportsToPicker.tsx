@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Agent } from "@paperclipai/shared";
+import type { AgentDirectoryEntry } from "../api/agents";
 import {
   Popover,
   PopoverContent,
@@ -16,14 +16,16 @@ export function ReportsToPicker({
   onChange,
   disabled = false,
   excludeAgentIds = [],
+  referenceCompanyId = null,
   disabledEmptyLabel = "Reports to: N/A (CEO)",
   chooseLabel = "Reports to...",
 }: {
-  agents: Agent[];
+  agents: AgentDirectoryEntry[];
   value: string | null;
   onChange: (id: string | null) => void;
   disabled?: boolean;
   excludeAgentIds?: string[];
+  referenceCompanyId?: string | null;
   disabledEmptyLabel?: string;
   chooseLabel?: string;
 }) {
@@ -35,6 +37,16 @@ export function ReportsToPicker({
   const current = value ? agents.find((a) => a.id === value) : null;
   const terminatedManager = current?.status === "terminated";
   const unknownManager = Boolean(value && !current);
+  const currentIsExternal = Boolean(
+    current &&
+      referenceCompanyId &&
+      current.companyId !== referenceCompanyId,
+  );
+
+  function externalCompanyLabel(agent: AgentDirectoryEntry) {
+    if (!referenceCompanyId || agent.companyId === referenceCompanyId) return null;
+    return agent.companyName ?? "External company";
+  }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -64,6 +76,11 @@ export function ReportsToPicker({
               >
                 {`Reports to ${current.name}${terminatedManager ? " (terminated)" : ""}`}
               </span>
+              {currentIsExternal && current.companyName ? (
+                <span className="shrink-0 text-[10px] text-muted-foreground">
+                  {current.companyName}
+                </span>
+              ) : null}
             </>
           ) : (
             <>
@@ -99,7 +116,7 @@ export function ReportsToPicker({
         )}
         {unknownManager && (
           <div className="px-2 py-1.5 text-xs text-muted-foreground border-b border-border mb-0.5">
-            Saved manager is missing from this company. Choose a new manager or clear.
+            Saved manager is missing from the visible manager directory. Choose a new manager or clear.
           </div>
         )}
         {rows.map((a) => (
@@ -116,7 +133,14 @@ export function ReportsToPicker({
             }}
           >
             <AgentIcon icon={a.icon} className="shrink-0 h-3 w-3 text-muted-foreground" />
-            <span className="min-w-0 truncate">{a.name}</span>
+            <div className="min-w-0 flex-1 text-left">
+              <div className="truncate">{a.name}</div>
+              {externalCompanyLabel(a) ? (
+                <div className="truncate text-[10px] text-muted-foreground">
+                  {externalCompanyLabel(a)}
+                </div>
+              ) : null}
+            </div>
             <span className="text-muted-foreground ml-auto shrink-0">{roleLabels[a.role] ?? a.role}</span>
           </button>
         ))}

@@ -40,6 +40,7 @@ function OrgTreeNode({
 }) {
   const [expanded, setExpanded] = useState(true);
   const hasChildren = node.reports.length > 0;
+  const externalLabel = node.externalToCompany ? node.companyName ?? "External company" : null;
 
   return (
     <div>
@@ -78,7 +79,14 @@ function OrgTreeNode({
                   : "bg-neutral-400"
           )}
         />
-        <span className="font-medium flex-1">{node.name}</span>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate font-medium">{node.name}</span>
+          {externalLabel ? (
+            <span className="truncate text-[10px] text-muted-foreground">
+              {externalLabel}
+            </span>
+          ) : null}
+        </div>
         <span className="text-xs text-muted-foreground">{node.role}</span>
         <StatusBadge status={node.status} />
       </Link>

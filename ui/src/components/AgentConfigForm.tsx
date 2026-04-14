@@ -306,9 +306,17 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
   const detectedModel = detectedModelData?.model ?? null;
   const detectedModelCandidates = detectedModelData?.candidates ?? [];
 
-  const { data: companyAgents = [] } = useQuery({
-    queryKey: selectedCompanyId ? queryKeys.agents.list(selectedCompanyId) : ["agents", "none", "list"],
-    queryFn: () => agentsApi.list(selectedCompanyId!),
+  const { data: visibleManagerCandidates = [] } = useQuery({
+    queryKey: selectedCompanyId
+      ? [...queryKeys.agents.listGlobal, selectedCompanyId, "manager-candidates"]
+      : ["agents", "none", "manager-candidates"],
+    queryFn: async () => {
+      try {
+        return await agentsApi.listGlobal();
+      } catch {
+        return selectedCompanyId ? await agentsApi.list(selectedCompanyId) : [];
+      }
+    },
     enabled: Boolean(!isCreate && selectedCompanyId),
   });
 
@@ -461,10 +469,11 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
             </Field>
             <Field label="Reports to" hint={help.reportsTo}>
               <ReportsToPicker
-                agents={companyAgents}
+                agents={visibleManagerCandidates}
                 value={eff("identity", "reportsTo", props.agent.reportsTo ?? null)}
                 onChange={(id) => mark("identity", "reportsTo", id)}
                 excludeAgentIds={[props.agent.id]}
+                referenceCompanyId={props.agent.companyId}
                 chooseLabel="Choose manager…"
               />
             </Field>
