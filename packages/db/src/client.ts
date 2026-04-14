@@ -420,6 +420,56 @@ async function migrationContentAlreadyApplied(
   return true;
 }
 
+async function trimTrailingUnappliedMigrations(
+  sql: ReturnType<typeof postgres>,
+  appliedMigrations: string[],
+): Promise<string[]> {
+  const trimmed = [...appliedMigrations];
+  while (trimmed.length > 0) {
+    const migrationFile = trimmed[trimmed.length - 1];
+    if (!migrationFile) break;
+    const migrationContent = await readMigrationFileContent(migrationFile);
+    if (await migrationContentAlreadyApplied(sql, migrationContent)) break;
+    trimmed.pop();
+  }
+  return trimmed;
+}
+
+async function inferAppliedMigrationsFromHistory(
+  sql: ReturnType<typeof postgres>,
+  qualifiedTable: string,
+  availableMigrations: string[],
+  rowCount: number,
+  columnNames: Set<string>,
+): Promise<string[]> {
+  if (rowCount <= 0 || availableMigrations.length === 0) return [];
+
+  const orderedAvailableMigrations = await orderMigrationsByJournal(availableMigrations);
+  let inferredCount = Math.min(rowCount, orderedAvailableMigrations.length);
+
+  if (columnNames.has("created_at")) {
+    const lastDbRows = await sql.unsafe<{ created_at: string | number | null }[]>(
+      `SELECT created_at FROM ${qualifiedTable} ORDER BY created_at DESC LIMIT 1`,
+    );
+    const lastCreatedAt = Number(lastDbRows[0]?.created_at ?? -1);
+    if (Number.isFinite(lastCreatedAt) && lastCreatedAt >= 0) {
+      const journalEntries = await listJournalMigrationEntries();
+      const availableByFileName = new Set(orderedAvailableMigrations);
+      const createdAtCount = journalEntries
+        .filter((entry) => availableByFileName.has(entry.fileName))
+        .filter((entry) => normalizeFolderMillis(entry.folderMillis) <= lastCreatedAt)
+        .length;
+      inferredCount = Math.min(
+        Math.max(inferredCount, createdAtCount),
+        orderedAvailableMigrations.length,
+      );
+    }
+  }
+
+  const tentativeAppliedMigrations = orderedAvailableMigrations.slice(0, inferredCount);
+  return trimTrailingUnappliedMigrations(sql, tentativeAppliedMigrations);
+}
+
 async function loadAppliedMigrations(
   sql: ReturnType<typeof postgres>,
   migrationTableSchema: string,
@@ -444,31 +494,29 @@ async function loadAppliedMigrations(
     if (appliedFromHashes.length > 0) {
       // Best-effort: when all hashes resolve, this is authoritative.
       if (appliedFromHashes.length === rows.length) return appliedFromHashes;
-
-      // Partial hash resolution can happen when files have changed; return what we can trust.
-      return appliedFromHashes;
     }
 
-    // Fallback only when hashes are unavailable/unresolved.
-    if (columnNames.has("created_at")) {
-      const journalEntries = await listJournalMigrationEntries();
-      if (journalEntries.length > 0) {
-        const lastDbRows = await sql.unsafe<{ created_at: string | number | null }[]>(
-          `SELECT created_at FROM ${qualifiedTable} ORDER BY created_at DESC LIMIT 1`,
-        );
-        const lastCreatedAt = Number(lastDbRows[0]?.created_at ?? -1);
-        if (Number.isFinite(lastCreatedAt) && lastCreatedAt >= 0) {
-          return journalEntries
-            .filter((entry) => availableMigrations.includes(entry.fileName))
-            .filter((entry) => entry.folderMillis <= lastCreatedAt)
-            .map((entry) => entry.fileName)
-            .slice(0, rows.length);
-        }
-      }
-    }
+    const inferredFromHistory = await inferAppliedMigrationsFromHistory(
+      sql,
+      qualifiedTable,
+      availableMigrations,
+      rows.length,
+      columnNames,
+    );
+    if (inferredFromHistory.length > 0) return inferredFromHistory;
+    if (appliedFromHashes.length > 0) return appliedFromHashes;
   }
 
   const rows = await sql.unsafe<{ id: number }[]>(`SELECT id FROM ${qualifiedTable} ORDER BY id`);
+  const inferredFromHistory = await inferAppliedMigrationsFromHistory(
+    sql,
+    qualifiedTable,
+    availableMigrations,
+    rows.length,
+    columnNames,
+  );
+  if (inferredFromHistory.length > 0) return inferredFromHistory;
+
   const journalMigrationFiles = await listJournalMigrationFiles();
   const appliedFromIds = rows
     .map((row) => journalMigrationFiles[row.id - 1])

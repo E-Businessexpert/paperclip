@@ -467,4 +467,74 @@ describeEmbeddedPostgres("applyPendingMigrations", () => {
     },
     20_000,
   );
+
+  it(
+    "treats partial hash history with a repaired duplicate row as only the truly missing tail migration",
+    async () => {
+      const connectionString = await createTempDatabase();
+
+      await applyPendingMigrations(connectionString);
+
+      const sql = postgres(connectionString, { max: 1, onnotice: () => {} });
+      try {
+        const matureMaskedHash = await migrationHash("0000_mature_masked_marvel.sql");
+        const projectActivityHash = await migrationHash("0056_project_activity_log.sql");
+
+        await sql.unsafe(
+          `DELETE FROM "drizzle"."__drizzle_migrations" WHERE hash = '${projectActivityHash}'`,
+        );
+        await sql.unsafe(`DROP INDEX IF EXISTS "activity_log_company_project_created_idx"`);
+        await sql.unsafe(`ALTER TABLE "activity_log" DROP COLUMN IF EXISTS "project_id"`);
+
+        await sql.unsafe(
+          `UPDATE "drizzle"."__drizzle_migrations" SET hash = 'legacy-' || id::text WHERE id <= 10`,
+        );
+        await sql.unsafe(
+          `INSERT INTO "drizzle"."__drizzle_migrations" ("hash", "created_at") VALUES ('${matureMaskedHash}', ${Date.now()})`,
+        );
+      } finally {
+        await sql.end();
+      }
+
+      const pendingState = await inspectMigrations(connectionString);
+      expect(pendingState).toMatchObject({
+        status: "needsMigrations",
+        pendingMigrations: ["0056_project_activity_log.sql"],
+        reason: "pending-migrations",
+      });
+
+      await applyPendingMigrations(connectionString);
+
+      const finalState = await inspectMigrations(connectionString);
+      expect(finalState.status).toBe("upToDate");
+
+      const verifySql = postgres(connectionString, { max: 1, onnotice: () => {} });
+      try {
+        const columns = await verifySql.unsafe<{ column_name: string }[]>(
+          `
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'activity_log'
+              AND column_name = 'project_id'
+          `,
+        );
+        expect(columns).toHaveLength(1);
+
+        const indexes = await verifySql.unsafe<{ indexname: string }[]>(
+          `
+            SELECT indexname
+            FROM pg_indexes
+            WHERE schemaname = 'public'
+              AND tablename = 'activity_log'
+              AND indexname = 'activity_log_company_project_created_idx'
+          `,
+        );
+        expect(indexes).toHaveLength(1);
+      } finally {
+        await verifySql.end();
+      }
+    },
+    20_000,
+  );
 });
