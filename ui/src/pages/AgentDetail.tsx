@@ -81,6 +81,7 @@ import { RunTranscriptView, type TranscriptMode } from "../components/transcript
 import {
   isUuidLike,
   BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES,
+  BUILTIN_ENTERPRISE_RELATIONSHIP_TEMPLATE_PACKS,
   resolveEnterpriseRelationshipTypes,
   type Agent,
   type AgentSkillEntry,
@@ -636,6 +637,7 @@ export function AgentDetail() {
   const activeView = urlRunId ? "runs" as AgentDetailView : parseAgentDetailView(urlTab ?? null);
   const needsDashboardData = activeView === "dashboard";
   const needsRunData = activeView === "runs" || Boolean(urlRunId);
+  const needsVisibleAgentDirectory = needsDashboardData || activeView === "configuration";
   const shouldLoadHeartbeats = needsDashboardData || needsRunData;
   const [configDirty, setConfigDirty] = useState(false);
   const [configSaving, setConfigSaving] = useState(false);
@@ -692,7 +694,7 @@ export function AgentDetail() {
         return resolvedCompanyId ? await agentsApi.list(resolvedCompanyId) : [];
       }
     },
-    enabled: !!resolvedCompanyId && needsDashboardData,
+    enabled: !!resolvedCompanyId && needsVisibleAgentDirectory,
   });
 
   const { data: budgetOverview } = useQuery({
@@ -1545,9 +1547,14 @@ const enterpriseRelationshipCategoryOptions: Array<{
   label: string;
 }> = [
   { value: "matrix", label: "Matrix" },
+  { value: "delivery", label: "Delivery" },
   { value: "decision", label: "Decision" },
+  { value: "service", label: "Service" },
   { value: "asset", label: "Asset" },
+  { value: "data", label: "Data" },
   { value: "governance", label: "Governance" },
+  { value: "finance", label: "Finance" },
+  { value: "communication", label: "Communication" },
   { value: "custom", label: "Custom" },
 ];
 
@@ -1658,6 +1665,7 @@ function ConfigurationTab({
   const [relationshipDraft, setRelationshipDraft] = useState<AgentEnterpriseRelationshipsRecord>(
     relationshipBaseline,
   );
+  const [relationshipTargetSearch, setRelationshipTargetSearch] = useState("");
 
   useEffect(() => {
     setRelationshipDraft(relationshipBaseline);
@@ -1674,13 +1682,67 @@ function ConfigurationTab({
         }),
     [agent.id, visibleAgents],
   );
+  const filteredRelationshipTargets = useMemo(() => {
+    const needle = relationshipTargetSearch.trim().toLowerCase();
+    if (!needle) return relationshipTargets;
+    return relationshipTargets.filter((candidate) =>
+      [
+        candidate.name,
+        candidate.companyName ?? "",
+        candidate.title ?? "",
+        candidate.role,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [relationshipTargetSearch, relationshipTargets]);
   const relationshipTargetById = useMemo(
     () => new Map(relationshipTargets.map((candidate) => [candidate.id, candidate])),
     [relationshipTargets],
   );
+  const relationshipTargetGroups = useMemo(() => {
+    const groups = new Map<string, AgentDirectoryEntry[]>();
+    for (const candidate of filteredRelationshipTargets) {
+      const key = candidate.companyName?.trim() || "Other agents";
+      const existing = groups.get(key);
+      if (existing) {
+        existing.push(candidate);
+      } else {
+        groups.set(key, [candidate]);
+      }
+    }
+    return [...groups.entries()];
+  }, [filteredRelationshipTargets]);
   const availableRelationshipTypes = useMemo(
     () => resolveEnterpriseRelationshipTypes(relationshipDraft.customTypes),
     [relationshipDraft.customTypes],
+  );
+  const relationshipTypeByKey = useMemo(
+    () => new Map(availableRelationshipTypes.map((definition) => [definition.key, definition])),
+    [availableRelationshipTypes],
+  );
+  const availableRelationshipTypeGroups = useMemo(
+    () =>
+      enterpriseRelationshipCategoryOptions
+        .map((option) => ({
+          ...option,
+          definitions: availableRelationshipTypes.filter(
+            (definition) => definition.category === option.value,
+          ),
+        }))
+        .filter((group) => group.definitions.length > 0),
+    [availableRelationshipTypes],
+  );
+  const relationshipTemplatePacks = useMemo(
+    () =>
+      BUILTIN_ENTERPRISE_RELATIONSHIP_TEMPLATE_PACKS.map((pack) => ({
+        ...pack,
+        definitions: pack.typeKeys
+          .map((typeKey) => relationshipTypeByKey.get(typeKey))
+          .filter((definition): definition is NonNullable<typeof definition> => Boolean(definition)),
+      })),
+    [relationshipTypeByKey],
   );
   const builtinRelationshipTypeKeys = useMemo(
     () => new Set(BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES.map((definition) => definition.key)),
@@ -1896,9 +1958,12 @@ function ConfigurationTab({
       };
     });
   };
-  const addRelationshipLink = () => {
-    const defaultType = availableRelationshipTypes[0]?.key ?? "dottedLineTo";
-    const defaultTarget = relationshipTargets[0]?.id ?? "";
+  const addRelationshipLink = (preferredTypeKey?: string) => {
+    const defaultType =
+      preferredTypeKey && relationshipTypeByKey.has(preferredTypeKey)
+        ? preferredTypeKey
+        : availableRelationshipTypes[0]?.key ?? "dottedLineTo";
+    const defaultTarget = filteredRelationshipTargets[0]?.id ?? relationshipTargets[0]?.id ?? "";
     setRelationshipDraft((current) => ({
       ...current,
       links: [
@@ -2065,8 +2130,7 @@ function ConfigurationTab({
         </div>
         <div className="border border-border rounded-lg p-4 space-y-5">
           <div className="rounded-md border border-dashed border-border/80 bg-muted/30 p-3 text-xs text-muted-foreground">
-            Built-in types are always available:{" "}
-            {BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES.map((definition) => definition.key).join(", ")}.
+            Start with the built-in relationship library and template packs below. Custom relationship types are an advanced fallback when the universal enterprise model still is not enough.
           </div>
           {relationshipValidationError ? (
             <div className="rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-700 dark:text-red-300">
@@ -2075,11 +2139,95 @@ function ConfigurationTab({
           ) : null}
 
           <div className="space-y-3">
+            <div>
+              <h4 className="text-sm font-medium">Built-in relationship templates</h4>
+              <p className="text-xs text-muted-foreground">
+                Pick a ready-made enterprise link instead of typing keys manually.
+              </p>
+            </div>
+            <div className="grid gap-3 xl:grid-cols-2">
+              {BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES.map((definition) => {
+                const categoryLabel =
+                  enterpriseRelationshipCategoryOptions.find(
+                    (option) => option.value === definition.category,
+                  )?.label ?? definition.category;
+                return (
+                  <div key={definition.key} className="space-y-2 rounded-lg border border-border p-3">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <div className="text-sm font-medium">{definition.label}</div>
+                        <div className="text-[11px] font-mono text-muted-foreground">{definition.key}</div>
+                      </div>
+                      <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+                        {categoryLabel}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{definition.description}</p>
+                    {definition.aiSemantics ? (
+                      <p className="text-[11px] text-muted-foreground">
+                        AI semantics: {definition.aiSemantics}
+                      </p>
+                    ) : null}
+                    <div className="flex justify-end">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => addRelationshipLink(definition.key)}
+                        disabled={relationshipTargets.length === 0}
+                      >
+                        Add link
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="space-y-3 border-t border-border pt-4">
+            <div>
+              <h4 className="text-sm font-medium">Relationship template packs</h4>
+              <p className="text-xs text-muted-foreground">
+                Use these grouped templates as enterprise presets for management, shared services, infrastructure, and compliance models.
+              </p>
+            </div>
+            <div className="grid gap-3 lg:grid-cols-2">
+              {relationshipTemplatePacks.map((pack) => (
+                <div key={pack.key} className="space-y-2 rounded-lg border border-border p-3">
+                  <div>
+                    <div className="text-sm font-medium">{pack.label}</div>
+                    <div className="text-[11px] font-mono text-muted-foreground">{pack.key}</div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{pack.description}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {pack.definitions.map((definition) => (
+                      <Button
+                        key={`${pack.key}-${definition.key}`}
+                        size="sm"
+                        variant="outline"
+                        onClick={() => addRelationshipLink(definition.key)}
+                        disabled={relationshipTargets.length === 0}
+                      >
+                        {definition.label}
+                      </Button>
+                    ))}
+                  </div>
+                  {pack.aiSemantics ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      AI semantics: {pack.aiSemantics}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-3 border-t border-border pt-4">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h4 className="text-sm font-medium">Custom relationship types</h4>
+                <h4 className="text-sm font-medium">Custom relationship types (advanced)</h4>
                 <p className="text-xs text-muted-foreground">
-                  Add reusable enterprise link types when the built-ins are not enough.
+                  Only add a custom relationship type when the built-in library and template packs are still not enough.
                 </p>
               </div>
               <Button size="sm" variant="outline" onClick={addCustomRelationshipType}>
@@ -2100,7 +2248,7 @@ function ConfigurationTab({
                         onChange={(event) =>
                           updateCustomRelationshipType(index, { key: event.target.value })
                         }
-                        placeholder="sharedServicesFrom"
+                        placeholder="procuredThrough"
                       />
                     </div>
                     <div className="space-y-1">
@@ -2110,7 +2258,7 @@ function ConfigurationTab({
                         onChange={(event) =>
                           updateCustomRelationshipType(index, { label: event.target.value })
                         }
-                        placeholder="Shared services from"
+                        placeholder="Procured through"
                       />
                     </div>
                     <div className="space-y-1">
@@ -2170,17 +2318,25 @@ function ConfigurationTab({
           </div>
 
           <div className="space-y-3 border-t border-border pt-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h4 className="text-sm font-medium">Relationship links</h4>
-                <p className="text-xs text-muted-foreground">
-                  Connect this agent to other agents with typed secondary enterprise links.
-                </p>
+            <div>
+              <h4 className="text-sm font-medium">Relationship links</h4>
+              <p className="text-xs text-muted-foreground">
+                Connect this agent to other agents with typed secondary enterprise links.
+              </p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Search target agents</label>
+                <Input
+                  value={relationshipTargetSearch}
+                  onChange={(event) => setRelationshipTargetSearch(event.target.value)}
+                  placeholder="Search by agent, company, role, or title"
+                />
               </div>
               <Button
                 size="sm"
                 variant="outline"
-                onClick={addRelationshipLink}
+                onClick={() => addRelationshipLink()}
                 disabled={relationshipTargets.length === 0}
               >
                 <Plus className="mr-2 h-4 w-4" />
@@ -2189,14 +2345,18 @@ function ConfigurationTab({
             </div>
             {relationshipTargets.length === 0 ? (
               <p className="text-xs text-muted-foreground">
-                No visible target agents are available for this relationship editor yet.
+                No eligible target agents are visible in this board scope yet. The editor needs directory visibility across the companies you want to link.
+              </p>
+            ) : filteredRelationshipTargets.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                No target agents match the current search. Clear the filter or broaden the board scope.
               </p>
             ) : null}
             {relationshipDraft.links.length === 0 ? (
               <p className="text-xs text-muted-foreground">No secondary enterprise relationships yet.</p>
             ) : (
               relationshipDraft.links.map((link) => {
-                const selectedType = availableRelationshipTypes.find((definition) => definition.key === link.typeKey);
+                const selectedType = relationshipTypeByKey.get(link.typeKey);
                 const selectedTarget = relationshipTargetById.get(link.targetAgentId);
                 return (
                   <div key={link.id} className="space-y-3 rounded-lg border border-border p-3">
@@ -2210,10 +2370,14 @@ function ConfigurationTab({
                             updateRelationshipLink(link.id, { typeKey: event.target.value })
                           }
                         >
-                          {availableRelationshipTypes.map((definition) => (
-                            <option key={definition.key} value={definition.key}>
-                              {definition.label} ({definition.key})
-                            </option>
+                          {availableRelationshipTypeGroups.map((group) => (
+                            <optgroup key={group.value} label={group.label}>
+                              {group.definitions.map((definition) => (
+                                <option key={definition.key} value={definition.key}>
+                                  {definition.label} ({definition.key})
+                                </option>
+                              ))}
+                            </optgroup>
                           ))}
                         </select>
                         {selectedType ? (
@@ -2232,15 +2396,28 @@ function ConfigurationTab({
                           }
                         >
                           <option value="">Select agent</option>
-                          {relationshipTargets.map((candidate) => (
-                            <option key={candidate.id} value={candidate.id}>
-                              {candidate.name}
-                              {candidate.companyName ? ` · ${candidate.companyName}` : ""}
-                            </option>
+                          {selectedTarget && !filteredRelationshipTargets.some((candidate) => candidate.id === selectedTarget.id) ? (
+                            <optgroup label="Selected target">
+                              <option value={selectedTarget.id}>
+                                {selectedTarget.name}
+                                {selectedTarget.companyName ? ` · ${selectedTarget.companyName}` : ""}
+                              </option>
+                            </optgroup>
+                          ) : null}
+                          {relationshipTargetGroups.map(([companyName, candidates]) => (
+                            <optgroup key={companyName} label={companyName}>
+                              {candidates.map((candidate) => (
+                                <option key={candidate.id} value={candidate.id}>
+                                  {candidate.name}
+                                  {candidate.title ? ` · ${candidate.title}` : ""}
+                                </option>
+                              ))}
+                            </optgroup>
                           ))}
                         </select>
                         {selectedTarget ? (
                           <p className="text-xs text-muted-foreground">
+                            {selectedTarget.companyName ? `${selectedTarget.companyName} · ` : ""}
                             {selectedTarget.role}
                             {selectedTarget.title ? ` · ${selectedTarget.title}` : ""}
                           </p>

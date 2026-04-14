@@ -13,12 +13,36 @@ This feature adds typed secondary links so organizations can model matrix, gover
 Paperclip now ships with these built-in relationship types:
 
 - `dottedLineTo`
+- `receivesWorkFrom`
+- `assignsWorkTo`
 - `approvalsRequiredFrom`
+- `escalatesTo`
+- `clientOf`
+- `serviceProviderFor`
 - `assetAllocatedBy`
 - `licensesFrom`
+- `hostedBy`
+- `supports`
+- `dependsOn`
+- `dataOwnedBy`
 - `governedBy`
+- `policyOwnedBy`
+- `auditedBy`
+- `securityApprovedBy`
+- `legalReviewedBy`
+- `budgetFundedBy`
+- `financeReviewedBy`
+- `statusReportedTo`
+- `mustInform`
 
 These built-ins are available to every company. They can be extended with company-specific custom relationship types.
+
+Paperclip also ships with built-in template packs so users can start from reusable enterprise patterns instead of manually inventing relationship keys:
+
+- `management_bureaucracy`
+- `client_provider`
+- `infrastructure_assets`
+- `data_compliance`
 
 ## Data model
 
@@ -32,7 +56,17 @@ type AgentEnterpriseRelationshipsRecord = {
     key: string;
     label: string;
     description: string;
-    category: "matrix" | "decision" | "asset" | "governance" | "custom";
+    category:
+      | "matrix"
+      | "delivery"
+      | "decision"
+      | "service"
+      | "asset"
+      | "data"
+      | "governance"
+      | "finance"
+      | "communication"
+      | "custom";
     aiSemantics: string | null;
   }>;
   links: Array<{
@@ -125,8 +159,11 @@ When an agent is removed, Paperclip also removes any secondary relationship link
 The Agent Detail configuration page provides:
 
 - a read/write secondary relationship editor
-- built-in relationship type visibility
-- custom relationship type management
+- built-in relationship templates with quick-add actions
+- built-in template packs for common enterprise patterns
+- grouped type dropdowns by category
+- searchable, company-grouped target agent selection
+- advanced custom relationship type management only when built-ins are not enough
 - link creation against the visible agent directory
 - notes and AI semantics capture
 

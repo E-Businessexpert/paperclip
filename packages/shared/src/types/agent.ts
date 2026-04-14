@@ -94,9 +94,14 @@ export interface AgentServiceDiscoveryCache {
 
 export const ENTERPRISE_RELATIONSHIP_CATEGORIES = [
   "matrix",
+  "delivery",
   "decision",
+  "service",
   "asset",
+  "data",
   "governance",
+  "finance",
+  "communication",
   "custom",
 ] as const;
 
@@ -114,6 +119,14 @@ export interface EnterpriseRelationshipTypeCustomDefinition {
 export interface EnterpriseRelationshipTypeDefinition
   extends EnterpriseRelationshipTypeCustomDefinition {
   builtIn: boolean;
+}
+
+export interface EnterpriseRelationshipTemplatePackDefinition {
+  key: string;
+  label: string;
+  description: string;
+  typeKeys: string[];
+  aiSemantics: string | null;
 }
 
 export interface AgentEnterpriseRelationshipLink {
@@ -168,6 +181,26 @@ export const BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES: readonly EnterpriseRelations
       builtIn: true,
     },
     {
+      key: "receivesWorkFrom",
+      label: "Receives work from",
+      description:
+        "The target is an upstream work source that assigns or routes delivery into the source agent's lane.",
+      category: "delivery",
+      aiSemantics:
+        "Use this when the target is a practical work origin for the source agent's queue, backlog, or execution stream.",
+      builtIn: true,
+    },
+    {
+      key: "assignsWorkTo",
+      label: "Assigns work to",
+      description:
+        "The source agent routes or assigns concrete work packages to the target for execution or follow-through.",
+      category: "delivery",
+      aiSemantics:
+        "Use this when the source agent is responsible for handing execution work to the target without making the target its direct report.",
+      builtIn: true,
+    },
+    {
       key: "approvalsRequiredFrom",
       label: "Approvals required from",
       description:
@@ -175,6 +208,36 @@ export const BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES: readonly EnterpriseRelations
       category: "decision",
       aiSemantics:
         "Use this when the target holds approval authority over the source agent's work, budget, release, or exception path.",
+      builtIn: true,
+    },
+    {
+      key: "escalatesTo",
+      label: "Escalates to",
+      description:
+        "The target is the secondary escalation destination when the source agent needs a higher-level intervention, ruling, or unblock.",
+      category: "decision",
+      aiSemantics:
+        "Use this when the target is the explicit escalation endpoint for operational deadlocks, exceptions, or conflicts.",
+      builtIn: true,
+    },
+    {
+      key: "clientOf",
+      label: "Client of",
+      description:
+        "The source agent consumes an internal or external service from the target as its client or customer.",
+      category: "service",
+      aiSemantics:
+        "Use this when the source agent depends on the target as a service provider, internal vendor, or managed partner.",
+      builtIn: true,
+    },
+    {
+      key: "serviceProviderFor",
+      label: "Service provider for",
+      description:
+        "The source agent provides an internal or external service to the target in a provider or operator capacity.",
+      category: "service",
+      aiSemantics:
+        "Use this when the source agent delivers a managed capability, platform, or support service to the target.",
       builtIn: true,
     },
     {
@@ -198,6 +261,46 @@ export const BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES: readonly EnterpriseRelations
       builtIn: true,
     },
     {
+      key: "hostedBy",
+      label: "Hosted by",
+      description:
+        "The target hosts the source agent's workload, runtime, or platform environment.",
+      category: "asset",
+      aiSemantics:
+        "Use this when the target owns the hosting surface, server, cluster, or runtime platform that the source agent depends on.",
+      builtIn: true,
+    },
+    {
+      key: "supports",
+      label: "Supports",
+      description:
+        "The source agent provides recurring operational, technical, or coordination support to the target.",
+      category: "delivery",
+      aiSemantics:
+        "Use this when the source agent materially helps the target succeed without acting as the target's formal manager.",
+      builtIn: true,
+    },
+    {
+      key: "dependsOn",
+      label: "Depends on",
+      description:
+        "The source agent cannot fully complete its work without an input, service, asset, or decision from the target.",
+      category: "delivery",
+      aiSemantics:
+        "Use this when the target is a dependency for the source agent's normal execution path.",
+      builtIn: true,
+    },
+    {
+      key: "dataOwnedBy",
+      label: "Data owned by",
+      description:
+        "The target is the owner or steward of the data domain the source agent uses, modifies, or depends on.",
+      category: "data",
+      aiSemantics:
+        "Use this when the target is responsible for data authority, stewardship, or domain ownership affecting the source agent.",
+      builtIn: true,
+    },
+    {
       key: "governedBy",
       label: "Governed by",
       description:
@@ -206,6 +309,152 @@ export const BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES: readonly EnterpriseRelations
       aiSemantics:
         "Use this when the target provides governance, policy control, oversight, or bureau-style authority over the source agent.",
       builtIn: true,
+    },
+    {
+      key: "policyOwnedBy",
+      label: "Policy owned by",
+      description:
+        "The target owns the formal policy, operating rule, or standard that the source agent must follow.",
+      category: "governance",
+      aiSemantics:
+        "Use this when the target is the canonical policy owner for the source agent's process, controls, or standards.",
+      builtIn: true,
+    },
+    {
+      key: "auditedBy",
+      label: "Audited by",
+      description:
+        "The target inspects, audits, or reviews the source agent's work for compliance, evidence, or control validation.",
+      category: "governance",
+      aiSemantics:
+        "Use this when the target provides audit or assurance oversight over the source agent.",
+      builtIn: true,
+    },
+    {
+      key: "securityApprovedBy",
+      label: "Security approved by",
+      description:
+        "The target holds the security approval gate for the source agent's system, release, workflow, or exception.",
+      category: "governance",
+      aiSemantics:
+        "Use this when the target is the security sign-off authority for the source agent's work.",
+      builtIn: true,
+    },
+    {
+      key: "legalReviewedBy",
+      label: "Legal reviewed by",
+      description:
+        "The target provides legal review, terms review, policy review, or contract review for the source agent's work.",
+      category: "governance",
+      aiSemantics:
+        "Use this when the target is the legal review authority for decisions or documents tied to the source agent.",
+      builtIn: true,
+    },
+    {
+      key: "budgetFundedBy",
+      label: "Budget funded by",
+      description:
+        "The target provides the budget, funding lane, or internal spending authority that enables the source agent's work.",
+      category: "finance",
+      aiSemantics:
+        "Use this when the target is the funding source or budget sponsor for the source agent.",
+      builtIn: true,
+    },
+    {
+      key: "financeReviewedBy",
+      label: "Finance reviewed by",
+      description:
+        "The target reviews the source agent's financial implications, billing structure, chargeback, or spend decisions.",
+      category: "finance",
+      aiSemantics:
+        "Use this when the target is the finance control or review checkpoint for the source agent's work.",
+      builtIn: true,
+    },
+    {
+      key: "statusReportedTo",
+      label: "Status reported to",
+      description:
+        "The source agent owes recurring status, progress, or operational reporting to the target.",
+      category: "communication",
+      aiSemantics:
+        "Use this when the target must receive structured updates from the source agent as part of routine oversight.",
+      builtIn: true,
+    },
+    {
+      key: "mustInform",
+      label: "Must inform",
+      description:
+        "The source agent must notify the target when relevant changes, incidents, milestones, or decisions occur.",
+      category: "communication",
+      aiSemantics:
+        "Use this when the target needs notification visibility from the source agent even without being the approver or primary manager.",
+      builtIn: true,
+    },
+  ] as const;
+
+export const BUILTIN_ENTERPRISE_RELATIONSHIP_TEMPLATE_PACKS: readonly EnterpriseRelationshipTemplatePackDefinition[] =
+  [
+    {
+      key: "management_bureaucracy",
+      label: "Management & bureaucracy",
+      description:
+        "Primary enterprise bureaucracy pack for matrix leadership, approvals, escalation, governance, and reporting visibility.",
+      typeKeys: [
+        "dottedLineTo",
+        "approvalsRequiredFrom",
+        "escalatesTo",
+        "governedBy",
+        "statusReportedTo",
+        "mustInform",
+      ],
+      aiSemantics:
+        "Use this pack when modeling formal enterprise oversight without changing the primary reportsTo chain.",
+    },
+    {
+      key: "client_provider",
+      label: "Client & provider",
+      description:
+        "Shared-services pack for internal clients, providers, work routing, and operational dependencies.",
+      typeKeys: [
+        "clientOf",
+        "serviceProviderFor",
+        "receivesWorkFrom",
+        "assignsWorkTo",
+        "supports",
+        "dependsOn",
+      ],
+      aiSemantics:
+        "Use this pack when teams serve each other through managed services, delivery lanes, or internal client-provider relationships.",
+    },
+    {
+      key: "infrastructure_assets",
+      label: "Infrastructure & assets",
+      description:
+        "Infrastructure pack for allocation, hosting, licensing, and budget sponsorship relationships.",
+      typeKeys: [
+        "assetAllocatedBy",
+        "licensesFrom",
+        "hostedBy",
+        "budgetFundedBy",
+      ],
+      aiSemantics:
+        "Use this pack when modeling who provides the environments, entitlements, hardware, and budget enabling the work.",
+    },
+    {
+      key: "data_compliance",
+      label: "Data & compliance",
+      description:
+        "Governance pack for data ownership, policy control, audit, and legal or security review flows.",
+      typeKeys: [
+        "dataOwnedBy",
+        "policyOwnedBy",
+        "auditedBy",
+        "securityApprovedBy",
+        "legalReviewedBy",
+        "financeReviewedBy",
+      ],
+      aiSemantics:
+        "Use this pack when the enterprise model needs explicit ownership and compliance review semantics around data, policy, and control functions.",
     },
   ] as const;
 

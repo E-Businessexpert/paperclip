@@ -58,6 +58,7 @@ export type {
   EnterpriseRelationshipCategory,
   EnterpriseRelationshipTypeCustomDefinition,
   EnterpriseRelationshipTypeDefinition,
+  EnterpriseRelationshipTemplatePackDefinition,
   AgentEnterpriseRelationshipLink,
   AgentEnterpriseRelationshipsRecord,
   ResolvedAgentEnterpriseRelationshipLink,
@@ -77,6 +78,7 @@ export type {
 export {
   ENTERPRISE_RELATIONSHIP_CATEGORIES,
   BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES,
+  BUILTIN_ENTERPRISE_RELATIONSHIP_TEMPLATE_PACKS,
   resolveEnterpriseRelationshipTypes,
 } from "./agent.js";
 export type { AssetImage } from "./asset.js";
