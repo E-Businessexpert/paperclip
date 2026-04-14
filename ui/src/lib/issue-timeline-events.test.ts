@@ -8,6 +8,7 @@ describe("extractIssueTimelineEvents", () => {
       {
         id: "evt-2",
         companyId: "company-1",
+        projectId: null,
         actorType: "user",
         actorId: "local-board",
         action: "issue.updated",
@@ -28,6 +29,7 @@ describe("extractIssueTimelineEvents", () => {
       {
         id: "evt-1",
         companyId: "company-1",
+        projectId: null,
         actorType: "user",
         actorId: "local-board",
         action: "issue.updated",
@@ -46,6 +48,7 @@ describe("extractIssueTimelineEvents", () => {
       {
         id: "evt-ignored",
         companyId: "company-1",
+        projectId: null,
         actorType: "user",
         actorId: "local-board",
         action: "issue.comment_added",
@@ -95,6 +98,7 @@ describe("extractIssueTimelineEvents", () => {
       {
         id: "evt-reopen",
         companyId: "company-1",
+        projectId: null,
         actorType: "agent",
         actorId: "agent-1",
         action: "issue.updated",
@@ -131,6 +135,7 @@ describe("extractIssueTimelineEvents", () => {
       {
         id: "evt-title",
         companyId: "company-1",
+        projectId: null,
         actorType: "user",
         actorId: "local-board",
         action: "issue.updated",

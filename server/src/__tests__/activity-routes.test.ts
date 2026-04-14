@@ -53,6 +53,8 @@ async function createApp() {
 }
 
 describe("activity routes", () => {
+  const PROJECT_ID = "11111111-1111-4111-8111-111111111111";
+
   beforeEach(() => {
     vi.resetModules();
     registerRouteMocks();
@@ -94,6 +96,61 @@ describe("activity routes", () => {
 
     expect(res.status).toBe(403);
     expect(mockActivityService.create).not.toHaveBeenCalled();
+  });
+
+  it("passes project filters through when listing company activity", async () => {
+    mockActivityService.list.mockResolvedValue([]);
+
+    const app = await createApp();
+    const res = await request(app)
+      .get("/api/companies/company-1/activity")
+      .query({ projectId: PROJECT_ID, agentId: "agent-1" });
+
+    expect(res.status).toBe(200);
+    expect(mockActivityService.list).toHaveBeenCalledWith({
+      companyId: "company-1",
+      projectId: PROJECT_ID,
+      agentId: "agent-1",
+      entityType: undefined,
+      entityId: undefined,
+    });
+  });
+
+  it("accepts project-aware activity creation", async () => {
+    mockActivityService.create.mockResolvedValue({
+      id: "activity-1",
+      companyId: "company-1",
+      projectId: PROJECT_ID,
+      actorType: "user",
+      actorId: "user-1",
+      action: "project.tested",
+      entityType: "project",
+      entityId: "project-1",
+      agentId: null,
+      runId: null,
+      details: null,
+      createdAt: new Date("2026-04-14T00:00:00.000Z"),
+    });
+
+    const app = await createApp();
+    const res = await request(app)
+      .post("/api/companies/company-1/activity")
+      .send({
+        projectId: PROJECT_ID,
+        actorId: "user-1",
+        action: "project.tested",
+        entityType: "project",
+        entityId: "project-1",
+      });
+
+    expect(res.status).toBe(201);
+    expect(mockActivityService.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        companyId: "company-1",
+        projectId: PROJECT_ID,
+        actorType: "system",
+      }),
+    );
   });
 
   it("requires company access before listing issues for another company's run", async () => {

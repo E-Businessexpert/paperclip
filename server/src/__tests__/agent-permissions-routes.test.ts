@@ -35,6 +35,7 @@ const baseAgent = {
 const mockAgentService = vi.hoisted(() => ({
   getById: vi.fn(),
   create: vi.fn(),
+  update: vi.fn(),
   updatePermissions: vi.fn(),
   getChainOfCommand: vi.fn(),
   resolveByReference: vi.fn(),
@@ -151,6 +152,7 @@ describe("agent permission routes", () => {
     mockAgentService.getChainOfCommand.mockResolvedValue([]);
     mockAgentService.resolveByReference.mockResolvedValue({ ambiguous: false, agent: baseAgent });
     mockAgentService.create.mockResolvedValue(baseAgent);
+    mockAgentService.update.mockResolvedValue(baseAgent);
     mockAgentService.updatePermissions.mockResolvedValue(baseAgent);
     mockAccessService.getMembership.mockResolvedValue({
       id: "membership-1",
@@ -414,5 +416,135 @@ describe("agent permission routes", () => {
 
     expect(res.status).toBe(403);
     expect(mockHeartbeatService.cancelRun).not.toHaveBeenCalled();
+  });
+
+  it("writes service discovery cache through the audited route", async () => {
+    mockAgentService.update.mockResolvedValue({
+      ...baseAgent,
+      metadata: {
+        serviceDiscoveryCache: {
+          version: 1,
+          cachedAt: "2026-04-14T10:00:00.000Z",
+          scope: "labs",
+          services: [],
+        },
+      },
+    });
+
+    const app = createApp({
+      type: "board",
+      userId: "board-user",
+      source: "local_implicit",
+      isInstanceAdmin: true,
+      companyIds: [companyId],
+    });
+
+    const res = await request(app)
+      .put(`/api/agents/${agentId}/service-discovery-cache`)
+      .send({
+        projectId: "33333333-3333-4333-8333-333333333333",
+        source: "inventory-sync",
+        cache: {
+          version: 1,
+          cachedAt: "2026-04-14T10:00:00.000Z",
+          scope: "labs",
+          services: [
+            {
+              id: "svc-1",
+              name: "Paperclip",
+              kind: "virtual",
+              hostKind: "vm",
+              lifecycleState: "active",
+              environment: "live",
+              source: "portainer",
+              systemOfRecord: "portainer",
+              hostRef: "15001-paperclip-control-plane-01",
+              ownerCompanyId: companyId,
+              ownerCompanyName: "Labs",
+              summary: "Primary orchestration runtime",
+              endpoint: "https://ai-agency.e-businessexpertlab.com",
+              ports: [443],
+              tags: ["paperclip"],
+              lastDiscoveredAt: "2026-04-14T10:00:00.000Z",
+              lastValidatedAt: "2026-04-14T10:05:00.000Z",
+              softwareAssignments: [
+                {
+                  id: "assign-1",
+                  name: "Paperclip deploy",
+                  category: "orchestration",
+                  assignmentKind: "software_deployed",
+                  version: "2026.04.14",
+                  environment: "live",
+                  endpoint: "https://ai-agency.e-businessexpertlab.com",
+                  ports: [443],
+                  assignedAgentIds: [agentId],
+                  assignedCapabilityKeys: ["system-design"],
+                  notes: "Portainer-managed control plane",
+                  tags: ["runtime"],
+                  lastObservedAt: "2026-04-14T10:05:00.000Z",
+                },
+              ],
+              metadata: null,
+            },
+          ],
+        },
+      });
+
+    expect(res.status).toBe(200);
+    expect(mockAgentService.update).toHaveBeenCalledWith(
+      agentId,
+      expect.objectContaining({
+        metadata: {
+          serviceDiscoveryCache: expect.objectContaining({
+            version: 1,
+            scope: "labs",
+          }),
+        },
+      }),
+      expect.any(Object),
+    );
+    expect(mockLogActivity).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        companyId,
+        projectId: "33333333-3333-4333-8333-333333333333",
+        action: "agent.service_discovery_cache_updated",
+      }),
+    );
+  });
+
+  it("allows explicit discovery managers to update another agent's deployment memory", async () => {
+    mockAgentService.getById
+      .mockResolvedValueOnce(baseAgent)
+      .mockResolvedValueOnce({
+        ...baseAgent,
+        id: "44444444-4444-4444-8444-444444444444",
+        permissions: {
+          canCreateAgents: false,
+          canManageServiceDiscovery: true,
+        },
+      });
+
+    const app = createApp({
+      type: "agent",
+      agentId: "44444444-4444-4444-8444-444444444444",
+      companyId,
+      runId: "run-1",
+      source: "agent_key",
+    });
+
+    const res = await request(app)
+      .put(`/api/agents/${agentId}/service-discovery-cache`)
+      .send({
+        cache: {
+          version: 1,
+          cachedAt: null,
+          scope: "shared",
+          services: [],
+        },
+      });
+
+    expect(res.status).toBe(200);
+    expect(mockAgentService.update).toHaveBeenCalled();
   });
 });

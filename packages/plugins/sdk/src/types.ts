@@ -464,6 +464,8 @@ export interface PluginSecretsClient {
 export interface PluginActivityLogEntry {
   /** UUID of the company this activity belongs to. Required for auditing. */
   companyId: string;
+  /** Optional UUID of the project this activity belongs to. */
+  projectId?: string;
   /** Human-readable description of the activity. */
   message: string;
   /** Optional entity type this activity relates to. */

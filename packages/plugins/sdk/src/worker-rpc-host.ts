@@ -466,6 +466,7 @@ export function startWorkerRpcHost(options: WorkerRpcHostOptions): WorkerRpcHost
         async log(entry): Promise<void> {
           await callHost("activity.log", {
             companyId: entry.companyId,
+            projectId: entry.projectId,
             message: entry.message,
             entityType: entry.entityType,
             entityId: entry.entityId,

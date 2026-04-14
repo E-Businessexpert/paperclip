@@ -17,6 +17,91 @@ export const agentPermissionsSchema = z.object({
   canGenerateSystemTopology: z.boolean().optional(),
 });
 
+export const discoveredServiceKindSchema = z.enum(["virtual", "physical", "hybrid"]);
+export const discoveredServiceHostKindSchema = z.enum([
+  "container",
+  "vm",
+  "server",
+  "workstation",
+  "network_device",
+  "hypervisor",
+  "saas",
+  "facility",
+  "cloud_service",
+  "other",
+]);
+export const discoveredServiceLifecycleStateSchema = z.enum([
+  "planned",
+  "active",
+  "degraded",
+  "retired",
+  "unknown",
+]);
+export const discoveredSoftwareAssignmentKindSchema = z.enum([
+  "software_deployed",
+  "tool_available",
+  "runtime_dependency",
+  "service_dependency",
+  "data_dependency",
+  "network_dependency",
+  "facility_dependency",
+  "asset_assignment",
+  "other",
+]);
+
+export const discoveredSoftwareAssignmentSchema = z.object({
+  id: z.string().trim().min(1),
+  name: z.string().trim().min(1),
+  category: z.string().trim().min(1).nullable(),
+  assignmentKind: discoveredSoftwareAssignmentKindSchema,
+  version: z.string().trim().min(1).nullable(),
+  environment: z.string().trim().min(1).nullable(),
+  endpoint: z.string().trim().min(1).nullable(),
+  ports: z.array(z.number().int().nonnegative()).default([]),
+  assignedAgentIds: z.array(z.string().uuid()).default([]),
+  assignedCapabilityKeys: z.array(z.string().trim().min(1)).default([]),
+  notes: z.string().nullable(),
+  tags: z.array(z.string().trim().min(1)).default([]),
+  lastObservedAt: z.string().trim().min(1).nullable(),
+});
+
+export const discoveredServiceRecordSchema = z.object({
+  id: z.string().trim().min(1),
+  name: z.string().trim().min(1),
+  kind: discoveredServiceKindSchema,
+  hostKind: discoveredServiceHostKindSchema,
+  lifecycleState: discoveredServiceLifecycleStateSchema,
+  environment: z.string().trim().min(1).nullable(),
+  source: z.string().trim().min(1).nullable(),
+  systemOfRecord: z.string().trim().min(1).nullable(),
+  hostRef: z.string().trim().min(1).nullable(),
+  ownerCompanyId: z.string().uuid().nullable(),
+  ownerCompanyName: z.string().trim().min(1).nullable(),
+  summary: z.string().nullable(),
+  endpoint: z.string().trim().min(1).nullable(),
+  ports: z.array(z.number().int().nonnegative()).default([]),
+  tags: z.array(z.string().trim().min(1)).default([]),
+  lastDiscoveredAt: z.string().trim().min(1).nullable(),
+  lastValidatedAt: z.string().trim().min(1).nullable(),
+  softwareAssignments: z.array(discoveredSoftwareAssignmentSchema).default([]),
+  metadata: z.record(z.unknown()).nullable().optional(),
+});
+
+export const agentServiceDiscoveryCacheSchema = z.object({
+  version: z.literal(1),
+  cachedAt: z.string().trim().min(1).nullable(),
+  scope: z.string().trim().min(1).nullable(),
+  services: z.array(discoveredServiceRecordSchema).default([]),
+});
+
+export const updateAgentServiceDiscoveryCacheSchema = z.object({
+  projectId: z.string().uuid().optional().nullable(),
+  source: z.string().trim().min(1).optional().nullable(),
+  cache: agentServiceDiscoveryCacheSchema.nullable(),
+});
+
+export type UpdateAgentServiceDiscoveryCache = z.infer<typeof updateAgentServiceDiscoveryCacheSchema>;
+
 export const agentInstructionsBundleModeSchema = z.enum(["managed", "external"]);
 
 export const updateAgentInstructionsBundleSchema = z.object({

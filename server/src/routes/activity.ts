@@ -8,6 +8,7 @@ import { heartbeatService, issueService } from "../services/index.js";
 import { sanitizeRecord } from "../redaction.js";
 
 const createActivitySchema = z.object({
+  projectId: z.string().uuid().optional().nullable(),
   actorType: z.enum(["agent", "user", "system"]).optional().default("system"),
   actorId: z.string().min(1),
   action: z.string().min(1),
@@ -36,6 +37,7 @@ export function activityRoutes(db: Db) {
 
     const filters = {
       companyId,
+      projectId: req.query.projectId as string | undefined,
       agentId: req.query.agentId as string | undefined,
       entityType: req.query.entityType as string | undefined,
       entityId: req.query.entityId as string | undefined,

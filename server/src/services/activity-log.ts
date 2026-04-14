@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Db } from "@paperclipai/db";
-import { activityLog } from "@paperclipai/db";
+import { and, eq } from "drizzle-orm";
+import { activityLog, issues } from "@paperclipai/db";
 import { PLUGIN_EVENT_TYPES, type PluginEventType } from "@paperclipai/shared";
 import type { PluginEvent } from "@paperclipai/plugin-sdk";
 import { publishLiveEvent } from "./live-events.js";
@@ -24,6 +25,7 @@ export function setPluginEventBus(bus: PluginEventBus): void {
 
 export interface LogActivityInput {
   companyId: string;
+  projectId?: string | null;
   actorType: "agent" | "user" | "system";
   actorId: string;
   action: string;
@@ -34,6 +36,39 @@ export interface LogActivityInput {
   details?: Record<string, unknown> | null;
 }
 
+async function resolveActivityProjectId(
+  db: Db,
+  input: LogActivityInput,
+  details: Record<string, unknown> | null,
+) {
+  if (typeof input.projectId === "string" && input.projectId.trim()) {
+    return input.projectId;
+  }
+
+  if (input.entityType === "project") {
+    return input.entityId;
+  }
+
+  const detailsProjectId = details && typeof details.projectId === "string" && details.projectId.trim()
+    ? details.projectId
+    : null;
+  if (detailsProjectId) {
+    return detailsProjectId;
+  }
+
+  if (input.entityType !== "issue") {
+    return null;
+  }
+
+  const row = await db
+    .select({ projectId: issues.projectId })
+    .from(issues)
+    .where(and(eq(issues.companyId, input.companyId), eq(issues.id, input.entityId)))
+    .then((rows) => rows[0] ?? null);
+
+  return row?.projectId ?? null;
+}
+
 export async function logActivity(db: Db, input: LogActivityInput) {
   const currentUserRedactionOptions = {
     enabled: (await instanceSettingsService(db).getGeneral()).censorUsernameInLogs,
@@ -42,8 +77,10 @@ export async function logActivity(db: Db, input: LogActivityInput) {
   const redactedDetails = sanitizedDetails
     ? redactCurrentUserValue(sanitizedDetails, currentUserRedactionOptions)
     : null;
+  const projectId = await resolveActivityProjectId(db, input, redactedDetails);
   await db.insert(activityLog).values({
     companyId: input.companyId,
+    projectId,
     actorType: input.actorType,
     actorId: input.actorId,
     action: input.action,
@@ -58,6 +95,7 @@ export async function logActivity(db: Db, input: LogActivityInput) {
     companyId: input.companyId,
     type: "activity.logged",
     payload: {
+      projectId,
       actorType: input.actorType,
       actorId: input.actorId,
       action: input.action,
@@ -81,6 +119,7 @@ export async function logActivity(db: Db, input: LogActivityInput) {
       companyId: input.companyId,
       payload: {
         ...redactedDetails,
+        projectId,
         agentId: input.agentId ?? null,
         runId: input.runId ?? null,
       },

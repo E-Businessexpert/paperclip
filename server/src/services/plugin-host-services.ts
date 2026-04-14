@@ -604,6 +604,7 @@ export function buildHostServices(
         await ensurePluginAvailableForCompany(companyId);
         await logActivity(db, {
           companyId,
+          projectId: params.projectId ?? null,
           actorType: "system",
           actorId: pluginId,
           action: params.message,

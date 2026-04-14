@@ -4,6 +4,7 @@ import { activityLog, agents, heartbeatRuns, issues } from "@paperclipai/db";
 
 export interface ActivityFilters {
   companyId: string;
+  projectId?: string;
   agentId?: string;
   entityType?: string;
   entityId?: string;
@@ -15,6 +16,9 @@ export function activityService(db: Db) {
     list: (filters: ActivityFilters) => {
       const conditions = [eq(activityLog.companyId, filters.companyId)];
 
+      if (filters.projectId) {
+        conditions.push(eq(activityLog.projectId, filters.projectId));
+      }
       if (filters.agentId) {
         conditions.push(eq(activityLog.agentId, filters.agentId));
       }

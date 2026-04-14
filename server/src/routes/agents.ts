@@ -15,8 +15,10 @@ import {
   resetAgentSessionSchema,
   testAdapterEnvironmentSchema,
   type AgentSkillSnapshot,
+  type AgentServiceDiscoveryCache,
   type InstanceSchedulerHeartbeatAgent,
   upsertAgentInstructionsFileSchema,
+  updateAgentServiceDiscoveryCacheSchema,
   updateAgentInstructionsBundleSchema,
   updateAgentPermissionsSchema,
   updateAgentInstructionsPathSchema,
@@ -115,6 +117,19 @@ export function agentRoutes(db: Db) {
   function canCreateAgents(agent: { role: string; permissions: Record<string, unknown> | null | undefined }) {
     if (!agent.permissions || typeof agent.permissions !== "object") return false;
     return Boolean((agent.permissions as Record<string, unknown>).canCreateAgents);
+  }
+
+  function hasAgentPermissionFlag(
+    agent: { permissions: Record<string, unknown> | null | undefined },
+    key:
+      | "canDesignOrganizations"
+      | "canManageRelationshipTypes"
+      | "canManageServiceDiscovery"
+      | "canManageDeploymentAssignments"
+      | "canGenerateSystemTopology",
+  ) {
+    if (!agent.permissions || typeof agent.permissions !== "object") return false;
+    return Boolean((agent.permissions as Record<string, unknown>)[key]);
   }
 
   async function buildAgentAccessState(agent: NonNullable<Awaited<ReturnType<typeof svc.getById>>>) {
@@ -620,6 +635,36 @@ export function agentRoutes(db: Db) {
     throw forbidden("Only the target agent or an ancestor manager can update instructions path");
   }
 
+  async function assertCanManageServiceDiscovery(req: Request, targetAgent: { id: string; companyId: string }) {
+    assertCompanyAccess(req, targetAgent.companyId);
+    if (req.actor.type === "board") return;
+    if (!req.actor.agentId) throw forbidden("Agent authentication required");
+
+    const actorAgent = await svc.getById(req.actor.agentId);
+    if (!actorAgent || actorAgent.companyId !== targetAgent.companyId) {
+      throw forbidden("Agent key cannot access another company");
+    }
+    if (actorAgent.id === targetAgent.id) return;
+    if (actorAgent.role === "ceo") return;
+
+    const allowedByGrant = await access.hasPermission(
+      targetAgent.companyId,
+      "agent",
+      actorAgent.id,
+      "agents:create",
+    );
+    if (
+      allowedByGrant
+      || canCreateAgents(actorAgent)
+      || hasAgentPermissionFlag(actorAgent, "canManageServiceDiscovery")
+      || hasAgentPermissionFlag(actorAgent, "canManageDeploymentAssignments")
+    ) {
+      return;
+    }
+
+    throw forbidden("Only CEO, agent creators, or discovery managers can update deployment memory");
+  }
+
   function summarizeAgentUpdateDetails(patch: Record<string, unknown>) {
     const changedTopLevelKeys = Object.keys(patch).sort();
     const details: Record<string, unknown> = { changedTopLevelKeys };
@@ -635,6 +680,34 @@ export function agentRoutes(db: Db) {
     }
 
     return details;
+  }
+
+  function summarizeServiceDiscoveryCacheUpdate(
+    cache: AgentServiceDiscoveryCache | null,
+    options?: { projectId?: string | null; source?: string | null },
+  ) {
+    const services = cache?.services ?? [];
+    const softwareAssignments = services.flatMap((service) => service.softwareAssignments ?? []);
+
+    return {
+      cleared: cache === null,
+      cacheVersion: cache?.version ?? null,
+      cachedAt: cache?.cachedAt ?? null,
+      scope: cache?.scope ?? null,
+      source: options?.source ?? null,
+      projectId: options?.projectId ?? null,
+      serviceCount: services.length,
+      softwareAssignmentCount: softwareAssignments.length,
+      serviceKinds: Array.from(new Set(services.map((service) => service.kind))).sort(),
+      hostKinds: Array.from(new Set(services.map((service) => service.hostKind))).sort(),
+      assignmentKinds: Array.from(new Set(softwareAssignments.map((assignment) => assignment.assignmentKind))).sort(),
+      uniqueAssignedAgentCount: new Set(
+        softwareAssignments.flatMap((assignment) => assignment.assignedAgentIds ?? []),
+      ).size,
+      uniqueCapabilityKeyCount: new Set(
+        softwareAssignments.flatMap((assignment) => assignment.assignedCapabilityKeys ?? []),
+      ).size,
+    };
   }
 
   function buildUnsupportedSkillSnapshot(
@@ -1631,6 +1704,65 @@ export function agentRoutes(db: Db) {
     res.json(await buildAgentDetail(agent));
   });
 
+  router.put("/agents/:id/service-discovery-cache", validate(updateAgentServiceDiscoveryCacheSchema), async (req, res) => {
+    const id = req.params.id as string;
+    const existing = await svc.getById(id);
+    if (!existing) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+
+    await assertCanManageServiceDiscovery(req, existing);
+
+    const actor = getActorInfo(req);
+    const existingMetadata = asRecord(existing.metadata) ?? {};
+    const nextMetadata: Record<string, unknown> = { ...existingMetadata };
+    if (req.body.cache === null) {
+      delete nextMetadata.serviceDiscoveryCache;
+    } else {
+      nextMetadata.serviceDiscoveryCache = req.body.cache;
+    }
+
+    const agent = await svc.update(
+      id,
+      { metadata: Object.keys(nextMetadata).length > 0 ? nextMetadata : null },
+      {
+        recordRevision: {
+          createdByAgentId: actor.agentId,
+          createdByUserId: actor.actorType === "user" ? actor.actorId : null,
+          source: "service_discovery_cache_patch",
+        },
+      },
+    );
+    if (!agent) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+
+    await logActivity(db, {
+      companyId: agent.companyId,
+      projectId: req.body.projectId ?? null,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      agentId: actor.agentId,
+      runId: actor.runId,
+      action: "agent.service_discovery_cache_updated",
+      entityType: "agent",
+      entityId: agent.id,
+      details: summarizeServiceDiscoveryCacheUpdate(req.body.cache, {
+        projectId: req.body.projectId ?? null,
+        source: req.body.source ?? null,
+      }),
+    });
+
+    res.json({
+      agentId: agent.id,
+      companyId: agent.companyId,
+      projectId: req.body.projectId ?? null,
+      serviceDiscoveryCache: req.body.cache,
+    });
+  });
+
   router.patch("/agents/:id/instructions-path", validate(updateAgentInstructionsPathSchema), async (req, res) => {
     const id = req.params.id as string;
     const existing = await svc.getById(id);
@@ -1884,6 +2016,13 @@ export function agentRoutes(db: Db) {
     }
 
     const patchData = { ...(req.body as Record<string, unknown>) };
+    const metadataPatch = hasOwn(patchData, "metadata") ? asRecord(patchData.metadata) : null;
+    if (metadataPatch && hasOwn(metadataPatch, "serviceDiscoveryCache")) {
+      res.status(422).json({
+        error: "Use /api/agents/:id/service-discovery-cache for deployment memory changes",
+      });
+      return;
+    }
     const replaceAdapterConfig = patchData.replaceAdapterConfig === true;
     delete patchData.replaceAdapterConfig;
     if (hasOwn(patchData, "adapterConfig")) {
