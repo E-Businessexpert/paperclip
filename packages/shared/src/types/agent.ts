@@ -92,8 +92,154 @@ export interface AgentServiceDiscoveryCache {
   services: DiscoveredServiceRecord[];
 }
 
+export const ENTERPRISE_RELATIONSHIP_CATEGORIES = [
+  "matrix",
+  "decision",
+  "asset",
+  "governance",
+  "custom",
+] as const;
+
+export type EnterpriseRelationshipCategory =
+  (typeof ENTERPRISE_RELATIONSHIP_CATEGORIES)[number];
+
+export interface EnterpriseRelationshipTypeCustomDefinition {
+  key: string;
+  label: string;
+  description: string;
+  category: EnterpriseRelationshipCategory;
+  aiSemantics: string | null;
+}
+
+export interface EnterpriseRelationshipTypeDefinition
+  extends EnterpriseRelationshipTypeCustomDefinition {
+  builtIn: boolean;
+}
+
+export interface AgentEnterpriseRelationshipLink {
+  id: string;
+  typeKey: string;
+  targetAgentId: string;
+  notes: string | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+export interface AgentEnterpriseRelationshipsRecord {
+  version: 1;
+  updatedAt: string | null;
+  customTypes: EnterpriseRelationshipTypeCustomDefinition[];
+  links: AgentEnterpriseRelationshipLink[];
+}
+
+export interface ResolvedAgentEnterpriseRelationshipLink
+  extends AgentEnterpriseRelationshipLink {
+  category: EnterpriseRelationshipCategory;
+  builtIn: boolean;
+  typeLabel: string;
+  typeDescription: string;
+  typeAiSemantics: string | null;
+  brokenTarget: boolean;
+  targetAgentName: string | null;
+  targetCompanyId: string | null;
+  targetCompanyName: string | null;
+  targetRole: AgentRole | null;
+  targetTitle: string | null;
+  targetStatus: AgentStatus | null;
+}
+
+export interface AgentEnterpriseRelationshipsView {
+  version: 1;
+  updatedAt: string | null;
+  customTypes: EnterpriseRelationshipTypeCustomDefinition[];
+  availableTypes: EnterpriseRelationshipTypeDefinition[];
+  links: ResolvedAgentEnterpriseRelationshipLink[];
+}
+
+export const BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES: readonly EnterpriseRelationshipTypeDefinition[] =
+  [
+    {
+      key: "dottedLineTo",
+      label: "Dotted line to",
+      description:
+        "Advisory or matrix relationship. The target influences work and coaching, but is not the formal primary manager.",
+      category: "matrix",
+      aiSemantics:
+        "Use this when the target provides secondary leadership, coordination, or guidance without replacing reportsTo.",
+      builtIn: true,
+    },
+    {
+      key: "approvalsRequiredFrom",
+      label: "Approvals required from",
+      description:
+        "The target must approve defined decisions, work items, releases, or exceptions before execution can continue.",
+      category: "decision",
+      aiSemantics:
+        "Use this when the target holds approval authority over the source agent's work, budget, release, or exception path.",
+      builtIn: true,
+    },
+    {
+      key: "assetAllocatedBy",
+      label: "Asset allocated by",
+      description:
+        "The target allocates physical or digital assets that the source agent depends on to operate.",
+      category: "asset",
+      aiSemantics:
+        "Use this when the target provides hardware, workspace, infrastructure assets, or operational equipment to the source agent.",
+      builtIn: true,
+    },
+    {
+      key: "licensesFrom",
+      label: "Licenses from",
+      description:
+        "The target provides software, platform, or intellectual-property licensing required for the source agent's work.",
+      category: "asset",
+      aiSemantics:
+        "Use this when the target grants the source agent access to software entitlements, IP rights, product rights, or platform licenses.",
+      builtIn: true,
+    },
+    {
+      key: "governedBy",
+      label: "Governed by",
+      description:
+        "The target defines policy, oversight, compliance, or managerial governance rules that the source agent must follow.",
+      category: "governance",
+      aiSemantics:
+        "Use this when the target provides governance, policy control, oversight, or bureau-style authority over the source agent.",
+      builtIn: true,
+    },
+  ] as const;
+
+export function resolveEnterpriseRelationshipTypes(
+  customTypes: EnterpriseRelationshipTypeCustomDefinition[] = [],
+): EnterpriseRelationshipTypeDefinition[] {
+  const definitions: EnterpriseRelationshipTypeDefinition[] =
+    BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES.map((definition) => ({ ...definition }));
+  const seenKeys = new Set(definitions.map((definition) => definition.key));
+
+  for (const customType of customTypes) {
+    const key = customType.key.trim();
+    if (!key || seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    definitions.push({
+      key,
+      label: customType.label.trim(),
+      description: customType.description.trim(),
+      category: customType.category,
+      aiSemantics:
+        typeof customType.aiSemantics === "string" &&
+        customType.aiSemantics.trim().length > 0
+          ? customType.aiSemantics.trim()
+          : null,
+      builtIn: false,
+    });
+  }
+
+  return definitions;
+}
+
 export interface AgentMetadataRecord extends Record<string, unknown> {
   serviceDiscoveryCache?: AgentServiceDiscoveryCache;
+  enterpriseRelationships?: AgentEnterpriseRelationshipsRecord;
 }
 
 export type AgentInstructionsBundleMode = "managed" | "external";
@@ -172,6 +318,7 @@ export interface Agent {
 export interface AgentDetail extends Agent {
   chainOfCommand: AgentChainOfCommandEntry[];
   access: AgentAccessState;
+  enterpriseRelationships: AgentEnterpriseRelationshipsView;
 }
 
 export interface AgentKeyCreated {

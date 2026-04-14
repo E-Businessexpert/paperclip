@@ -185,4 +185,43 @@ describeEmbeddedPostgres("cleanup removal services", () => {
     await expect(db.select().from(issueReadStates).where(eq(issueReadStates.companyId, companyId))).resolves.toHaveLength(0);
     await expect(db.select().from(activityLog).where(eq(activityLog.companyId, companyId))).resolves.toHaveLength(0);
   });
+
+  it("removes enterprise relationship links that target a deleted agent", async () => {
+    const { agentId, companyId } = await seedFixture();
+    const relatedAgentId = randomUUID();
+
+    await db.insert(agents).values({
+      id: relatedAgentId,
+      companyId,
+      name: "Relationship Keeper",
+      role: "manager",
+      status: "active",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+      metadata: {
+        enterpriseRelationships: {
+          version: 1,
+          updatedAt: "2026-04-14T00:00:00.000Z",
+          customTypes: [],
+          links: [
+            {
+              id: "rel-1",
+              typeKey: "dottedLineTo",
+              targetAgentId: agentId,
+              notes: "Secondary oversight",
+            },
+          ],
+        },
+      },
+    });
+
+    await agentService(db).remove(agentId);
+
+    const [relatedAgent] = await db.select().from(agents).where(eq(agents.id, relatedAgentId));
+    expect(relatedAgent).toBeDefined();
+    const metadata = (relatedAgent?.metadata ?? null) as Record<string, unknown> | null;
+    expect(metadata?.enterpriseRelationships).toBeUndefined();
+  });
 });

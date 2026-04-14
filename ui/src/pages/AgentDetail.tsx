@@ -80,11 +80,16 @@ import { AgentIcon, AgentIconPicker } from "../components/AgentIconPicker";
 import { RunTranscriptView, type TranscriptMode } from "../components/transcript/RunTranscriptView";
 import {
   isUuidLike,
+  BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES,
+  resolveEnterpriseRelationshipTypes,
   type Agent,
   type AgentSkillEntry,
   type AgentSkillSnapshot,
   type AgentDetail as AgentDetailRecord,
+  type AgentEnterpriseRelationshipsRecord,
+  type AgentEnterpriseRelationshipsView,
   type BudgetPolicySummary,
+  type EnterpriseRelationshipCategory,
   type HeartbeatRun,
   type HeartbeatRunEvent,
   type AgentRuntimeState,
@@ -1122,6 +1127,7 @@ export function AgentDetail() {
           agent={agent}
           agentId={agent.id}
           companyId={resolvedCompanyId ?? undefined}
+          visibleAgents={visibleAgents}
           onDirtyChange={setConfigDirty}
           onSaveActionChange={setSaveConfigAction}
           onCancelActionChange={setCancelConfigAction}
@@ -1425,6 +1431,7 @@ function AgentConfigurePage({
   agent,
   agentId,
   companyId,
+  visibleAgents,
   onDirtyChange,
   onSaveActionChange,
   onCancelActionChange,
@@ -1434,6 +1441,7 @@ function AgentConfigurePage({
   agent: AgentDetailRecord;
   agentId: string;
   companyId?: string;
+  visibleAgents: AgentDirectoryEntry[];
   onDirtyChange: (dirty: boolean) => void;
   onSaveActionChange: (save: (() => void) | null) => void;
   onCancelActionChange: (cancel: (() => void) | null) => void;
@@ -1463,6 +1471,7 @@ function AgentConfigurePage({
     <div className="max-w-3xl space-y-6">
       <ConfigurationTab
         agent={agent}
+        visibleAgents={visibleAgents}
         onDirtyChange={onDirtyChange}
         onSaveActionChange={onSaveActionChange}
         onCancelActionChange={onCancelActionChange}
@@ -1531,10 +1540,59 @@ function AgentConfigurePage({
   );
 }
 
+const enterpriseRelationshipCategoryOptions: Array<{
+  value: EnterpriseRelationshipCategory;
+  label: string;
+}> = [
+  { value: "matrix", label: "Matrix" },
+  { value: "decision", label: "Decision" },
+  { value: "asset", label: "Asset" },
+  { value: "governance", label: "Governance" },
+  { value: "custom", label: "Custom" },
+];
+
+function createRelationshipId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `rel_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function buildEnterpriseRelationshipsDraft(
+  view: AgentEnterpriseRelationshipsView | null | undefined,
+): AgentEnterpriseRelationshipsRecord {
+  return {
+    version: 1,
+    updatedAt: view?.updatedAt ?? null,
+    customTypes: (view?.customTypes ?? []).map((customType) => ({ ...customType })),
+    links: (view?.links ?? []).map((link) => ({
+      id: link.id,
+      typeKey: link.typeKey,
+      targetAgentId: link.targetAgentId,
+      notes: link.notes ?? null,
+      metadata: link.metadata ?? null,
+    })),
+  };
+}
+
+function enterpriseRelationshipsEqual(
+  left: AgentEnterpriseRelationshipsRecord,
+  right: AgentEnterpriseRelationshipsRecord,
+) {
+  return JSON.stringify({
+    customTypes: left.customTypes,
+    links: left.links,
+  }) === JSON.stringify({
+    customTypes: right.customTypes,
+    links: right.links,
+  });
+}
+
 /* ---- Configuration Tab ---- */
 
 function ConfigurationTab({
   agent,
+  visibleAgents,
   companyId,
   onDirtyChange,
   onSaveActionChange,
@@ -1545,6 +1603,7 @@ function ConfigurationTab({
   hideInstructionsFile,
 }: {
   agent: AgentDetailRecord;
+  visibleAgents: AgentDirectoryEntry[];
   companyId?: string;
   onDirtyChange: (dirty: boolean) => void;
   onSaveActionChange: (save: (() => void) | null) => void;
@@ -1592,13 +1651,122 @@ function ConfigurationTab({
     },
   });
 
+  const relationshipBaseline = useMemo(
+    () => buildEnterpriseRelationshipsDraft(agent.enterpriseRelationships),
+    [agent.enterpriseRelationships],
+  );
+  const [relationshipDraft, setRelationshipDraft] = useState<AgentEnterpriseRelationshipsRecord>(
+    relationshipBaseline,
+  );
+
+  useEffect(() => {
+    setRelationshipDraft(relationshipBaseline);
+  }, [relationshipBaseline]);
+
+  const relationshipTargets = useMemo(
+    () =>
+      [...visibleAgents]
+        .filter((candidate) => candidate.id !== agent.id && candidate.status !== "terminated")
+        .sort((left, right) => {
+          const companyOrder = (left.companyName ?? "").localeCompare(right.companyName ?? "");
+          if (companyOrder !== 0) return companyOrder;
+          return left.name.localeCompare(right.name);
+        }),
+    [agent.id, visibleAgents],
+  );
+  const relationshipTargetById = useMemo(
+    () => new Map(relationshipTargets.map((candidate) => [candidate.id, candidate])),
+    [relationshipTargets],
+  );
+  const availableRelationshipTypes = useMemo(
+    () => resolveEnterpriseRelationshipTypes(relationshipDraft.customTypes),
+    [relationshipDraft.customTypes],
+  );
+  const builtinRelationshipTypeKeys = useMemo(
+    () => new Set(BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES.map((definition) => definition.key)),
+    [],
+  );
+  const relationshipsDirty = useMemo(
+    () => !enterpriseRelationshipsEqual(relationshipDraft, relationshipBaseline),
+    [relationshipDraft, relationshipBaseline],
+  );
+  const relationshipValidationError = useMemo(() => {
+    const seenCustomKeys = new Set<string>();
+    for (const customType of relationshipDraft.customTypes) {
+      const key = customType.key.trim();
+      if (!key) return "Every custom relationship type needs a key.";
+      if (!/^[A-Za-z][A-Za-z0-9:_-]*$/.test(key)) {
+        return "Custom relationship keys must start with a letter and use only letters, numbers, :, _, or -.";
+      }
+      if (builtinRelationshipTypeKeys.has(key)) {
+        return `Custom relationship key '${key}' conflicts with a built-in type.`;
+      }
+      if (seenCustomKeys.has(key)) {
+        return `Custom relationship key '${key}' is duplicated.`;
+      }
+      seenCustomKeys.add(key);
+      if (!customType.label.trim()) return "Every custom relationship type needs a label.";
+      if (!customType.description.trim()) return "Every custom relationship type needs a description.";
+    }
+
+    const validTypeKeys = new Set(availableRelationshipTypes.map((definition) => definition.key));
+    const seenPairs = new Set<string>();
+    for (const link of relationshipDraft.links) {
+      if (!link.typeKey.trim()) return "Every enterprise relationship needs a type.";
+      if (!validTypeKeys.has(link.typeKey)) return `Unknown relationship type '${link.typeKey}'.`;
+      if (!link.targetAgentId.trim()) return "Every enterprise relationship needs a target agent.";
+      const pairKey = `${link.typeKey}::${link.targetAgentId}`;
+      if (seenPairs.has(pairKey)) {
+        return "Duplicate enterprise relationship targets are not allowed for the same type.";
+      }
+      seenPairs.add(pairKey);
+    }
+
+    return null;
+  }, [availableRelationshipTypes, builtinRelationshipTypeKeys, relationshipDraft.customTypes, relationshipDraft.links]);
+
+  const updateEnterpriseRelationships = useMutation({
+    mutationFn: (relationships: AgentEnterpriseRelationshipsRecord | null) =>
+      agentsApi.updateEnterpriseRelationships(
+        agent.id,
+        {
+          relationships,
+          source: "agent_configuration_ui",
+        },
+        companyId,
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agent.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agent.urlKey) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.listGlobal });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(agent.companyId) });
+      pushToast({
+        title: "Enterprise relationships saved",
+        body: "Secondary reporting, approval, asset, license, and governance links are updated.",
+        tone: "success",
+      });
+    },
+    onError: (err) => {
+      const message =
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Could not save enterprise relationships";
+      pushToast({ title: "Save failed", body: message, tone: "error" });
+    },
+  });
+
   useEffect(() => {
     if (awaitingRefreshAfterSave && agent !== lastAgentRef.current) {
       setAwaitingRefreshAfterSave(false);
     }
     lastAgentRef.current = agent;
   }, [agent, awaitingRefreshAfterSave]);
-  const isConfigSaving = updateAgent.isPending || awaitingRefreshAfterSave;
+  const isConfigSaving =
+    updateAgent.isPending ||
+    updateEnterpriseRelationships.isPending ||
+    awaitingRefreshAfterSave;
 
   useEffect(() => {
     onSavingChange(isConfigSaving);
@@ -1688,6 +1856,99 @@ function ConfigurationTab({
       checked: canGenerateSystemTopology,
     },
   ];
+  const addCustomRelationshipType = () => {
+    setRelationshipDraft((current) => ({
+      ...current,
+      customTypes: [
+        ...current.customTypes,
+        {
+          key: "",
+          label: "",
+          description: "",
+          category: "custom",
+          aiSemantics: null,
+        },
+      ],
+    }));
+  };
+  const updateCustomRelationshipType = (
+    index: number,
+    patch: Partial<AgentEnterpriseRelationshipsRecord["customTypes"][number]>,
+  ) => {
+    setRelationshipDraft((current) => ({
+      ...current,
+      customTypes: current.customTypes.map((customType, customTypeIndex) =>
+        customTypeIndex === index ? { ...customType, ...patch } : customType,
+      ),
+    }));
+  };
+  const removeCustomRelationshipType = (index: number) => {
+    setRelationshipDraft((current) => {
+      const removed = current.customTypes[index];
+      const nextCustomTypes = current.customTypes.filter((_, customTypeIndex) => customTypeIndex !== index);
+      const nextLinks = removed
+        ? current.links.filter((link) => link.typeKey !== removed.key)
+        : current.links;
+      return {
+        ...current,
+        customTypes: nextCustomTypes,
+        links: nextLinks,
+      };
+    });
+  };
+  const addRelationshipLink = () => {
+    const defaultType = availableRelationshipTypes[0]?.key ?? "dottedLineTo";
+    const defaultTarget = relationshipTargets[0]?.id ?? "";
+    setRelationshipDraft((current) => ({
+      ...current,
+      links: [
+        ...current.links,
+        {
+          id: createRelationshipId(),
+          typeKey: defaultType,
+          targetAgentId: defaultTarget,
+          notes: null,
+          metadata: null,
+        },
+      ],
+    }));
+  };
+  const updateRelationshipLink = (
+    id: string,
+    patch: Partial<AgentEnterpriseRelationshipsRecord["links"][number]>,
+  ) => {
+    setRelationshipDraft((current) => ({
+      ...current,
+      links: current.links.map((link) => (link.id === id ? { ...link, ...patch } : link)),
+    }));
+  };
+  const removeRelationshipLink = (id: string) => {
+    setRelationshipDraft((current) => ({
+      ...current,
+      links: current.links.filter((link) => link.id !== id),
+    }));
+  };
+  const resetRelationships = () => {
+    setRelationshipDraft(relationshipBaseline);
+  };
+  const saveRelationships = () => {
+    if (relationshipValidationError) {
+      pushToast({
+        title: "Relationships need attention",
+        body: relationshipValidationError,
+        tone: "error",
+      });
+      return;
+    }
+    const payload =
+      relationshipDraft.customTypes.length === 0 && relationshipDraft.links.length === 0
+        ? null
+        : {
+          ...relationshipDraft,
+          updatedAt: relationshipBaseline.updatedAt,
+        };
+    updateEnterpriseRelationships.mutate(payload);
+  };
 
   return (
     <div className="space-y-6">
@@ -1763,6 +2024,253 @@ function ConfigurationTab({
               />
             </div>
           ))}
+        </div>
+      </div>
+
+      <div>
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-1">
+            <h3 className="text-sm font-medium">Secondary Enterprise Relationships</h3>
+            <p className="text-xs text-muted-foreground">
+              Keep one formal <span className="font-mono">reportsTo</span> chain, then use typed secondary links for approvals, dotted lines, asset allocation, licenses, and governance.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {relationshipsDirty ? (
+              <span className="text-xs text-amber-600 dark:text-amber-400">Unsaved changes</span>
+            ) : null}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={resetRelationships}
+              disabled={!relationshipsDirty || updateEnterpriseRelationships.isPending}
+            >
+              Reset
+            </Button>
+            <Button
+              size="sm"
+              onClick={saveRelationships}
+              disabled={!relationshipsDirty || updateEnterpriseRelationships.isPending || Boolean(relationshipValidationError)}
+            >
+              {updateEnterpriseRelationships.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Saving
+                </>
+              ) : (
+                "Save relationships"
+              )}
+            </Button>
+          </div>
+        </div>
+        <div className="border border-border rounded-lg p-4 space-y-5">
+          <div className="rounded-md border border-dashed border-border/80 bg-muted/30 p-3 text-xs text-muted-foreground">
+            Built-in types are always available:{" "}
+            {BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES.map((definition) => definition.key).join(", ")}.
+          </div>
+          {relationshipValidationError ? (
+            <div className="rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-700 dark:text-red-300">
+              {relationshipValidationError}
+            </div>
+          ) : null}
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h4 className="text-sm font-medium">Custom relationship types</h4>
+                <p className="text-xs text-muted-foreground">
+                  Add reusable enterprise link types when the built-ins are not enough.
+                </p>
+              </div>
+              <Button size="sm" variant="outline" onClick={addCustomRelationshipType}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add type
+              </Button>
+            </div>
+            {relationshipDraft.customTypes.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No custom relationship types yet.</p>
+            ) : (
+              relationshipDraft.customTypes.map((customType, index) => (
+                <div key={`custom-type-${index}`} className="space-y-3 rounded-lg border border-border p-3">
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground">Key</label>
+                      <Input
+                        value={customType.key}
+                        onChange={(event) =>
+                          updateCustomRelationshipType(index, { key: event.target.value })
+                        }
+                        placeholder="sharedServicesFrom"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground">Label</label>
+                      <Input
+                        value={customType.label}
+                        onChange={(event) =>
+                          updateCustomRelationshipType(index, { label: event.target.value })
+                        }
+                        placeholder="Shared services from"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground">Category</label>
+                      <select
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        value={customType.category}
+                        onChange={(event) =>
+                          updateCustomRelationshipType(index, {
+                            category: event.target.value as EnterpriseRelationshipCategory,
+                          })
+                        }
+                      >
+                        {enterpriseRelationshipCategoryOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground">Description</label>
+                      <textarea
+                        className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        value={customType.description}
+                        onChange={(event) =>
+                          updateCustomRelationshipType(index, { description: event.target.value })
+                        }
+                        placeholder="Describe what this relationship means in the enterprise model."
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground">AI semantics</label>
+                      <textarea
+                        className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        value={customType.aiSemantics ?? ""}
+                        onChange={(event) =>
+                          updateCustomRelationshipType(index, {
+                            aiSemantics: event.target.value.trim().length > 0 ? event.target.value : null,
+                          })
+                        }
+                        placeholder="Tell the AI how to interpret and use this relationship."
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end">
+                    <Button size="sm" variant="ghost" onClick={() => removeCustomRelationshipType(index)}>
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Remove type
+                    </Button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="space-y-3 border-t border-border pt-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h4 className="text-sm font-medium">Relationship links</h4>
+                <p className="text-xs text-muted-foreground">
+                  Connect this agent to other agents with typed secondary enterprise links.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={addRelationshipLink}
+                disabled={relationshipTargets.length === 0}
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                Add relationship
+              </Button>
+            </div>
+            {relationshipTargets.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                No visible target agents are available for this relationship editor yet.
+              </p>
+            ) : null}
+            {relationshipDraft.links.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No secondary enterprise relationships yet.</p>
+            ) : (
+              relationshipDraft.links.map((link) => {
+                const selectedType = availableRelationshipTypes.find((definition) => definition.key === link.typeKey);
+                const selectedTarget = relationshipTargetById.get(link.targetAgentId);
+                return (
+                  <div key={link.id} className="space-y-3 rounded-lg border border-border p-3">
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium text-muted-foreground">Type</label>
+                        <select
+                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          value={link.typeKey}
+                          onChange={(event) =>
+                            updateRelationshipLink(link.id, { typeKey: event.target.value })
+                          }
+                        >
+                          {availableRelationshipTypes.map((definition) => (
+                            <option key={definition.key} value={definition.key}>
+                              {definition.label} ({definition.key})
+                            </option>
+                          ))}
+                        </select>
+                        {selectedType ? (
+                          <p className="text-xs text-muted-foreground">
+                            {selectedType.description}
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium text-muted-foreground">Target agent</label>
+                        <select
+                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          value={link.targetAgentId}
+                          onChange={(event) =>
+                            updateRelationshipLink(link.id, { targetAgentId: event.target.value })
+                          }
+                        >
+                          <option value="">Select agent</option>
+                          {relationshipTargets.map((candidate) => (
+                            <option key={candidate.id} value={candidate.id}>
+                              {candidate.name}
+                              {candidate.companyName ? ` · ${candidate.companyName}` : ""}
+                            </option>
+                          ))}
+                        </select>
+                        {selectedTarget ? (
+                          <p className="text-xs text-muted-foreground">
+                            {selectedTarget.role}
+                            {selectedTarget.title ? ` · ${selectedTarget.title}` : ""}
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground">Notes</label>
+                      <textarea
+                        className="min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        value={link.notes ?? ""}
+                        onChange={(event) =>
+                          updateRelationshipLink(link.id, {
+                            notes: event.target.value.trim().length > 0 ? event.target.value : null,
+                          })
+                        }
+                        placeholder="Optional context, scope, or rule for this relationship."
+                      />
+                    </div>
+                    <div className="flex justify-end">
+                      <Button size="sm" variant="ghost" onClick={() => removeRelationshipLink(link.id)}>
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Remove relationship
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
       </div>
     </div>

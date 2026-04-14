@@ -15,9 +15,11 @@ import {
   resetAgentSessionSchema,
   testAdapterEnvironmentSchema,
   type AgentSkillSnapshot,
+  type AgentEnterpriseRelationshipsRecord,
   type AgentServiceDiscoveryCache,
   type InstanceSchedulerHeartbeatAgent,
   upsertAgentInstructionsFileSchema,
+  updateAgentEnterpriseRelationshipsSchema,
   updateAgentServiceDiscoveryCacheSchema,
   updateAgentInstructionsBundleSchema,
   updateAgentPermissionsSchema,
@@ -178,14 +180,24 @@ export function agentRoutes(db: Db) {
     agent: NonNullable<Awaited<ReturnType<typeof svc.getById>>>,
     options?: { restricted?: boolean },
   ) {
-    const [chainOfCommand, accessState] = await Promise.all([
+    const [chainOfCommand, accessState, enterpriseRelationships] = await Promise.all([
       svc.getChainOfCommand(agent.id),
       buildAgentAccessState(agent),
+      options?.restricted
+        ? Promise.resolve({
+          version: 1 as const,
+          updatedAt: null,
+          customTypes: [],
+          availableTypes: [],
+          links: [],
+        })
+        : svc.getEnterpriseRelationshipsView(agent.id),
     ]);
 
     return {
       ...(options?.restricted ? redactForRestrictedAgentView(agent) : agent),
       chainOfCommand,
+      enterpriseRelationships,
       access: accessState,
     };
   }
@@ -665,6 +677,39 @@ export function agentRoutes(db: Db) {
     throw forbidden("Only CEO, agent creators, or discovery managers can update deployment memory");
   }
 
+  async function assertCanManageEnterpriseRelationships(
+    req: Request,
+    targetAgent: { id: string; companyId: string },
+  ) {
+    assertCompanyAccess(req, targetAgent.companyId);
+    if (req.actor.type === "board") return;
+    if (!req.actor.agentId) throw forbidden("Agent authentication required");
+
+    const actorAgent = await svc.getById(req.actor.agentId);
+    if (!actorAgent || actorAgent.companyId !== targetAgent.companyId) {
+      throw forbidden("Agent key cannot access another company");
+    }
+    if (actorAgent.id === targetAgent.id) return;
+    if (actorAgent.role === "ceo") return;
+
+    const allowedByGrant = await access.hasPermission(
+      targetAgent.companyId,
+      "agent",
+      actorAgent.id,
+      "agents:create",
+    );
+    if (
+      allowedByGrant
+      || canCreateAgents(actorAgent)
+      || hasAgentPermissionFlag(actorAgent, "canDesignOrganizations")
+      || hasAgentPermissionFlag(actorAgent, "canManageRelationshipTypes")
+    ) {
+      return;
+    }
+
+    throw forbidden("Only CEO, agent creators, or organization designers can update enterprise relationships");
+  }
+
   function summarizeAgentUpdateDetails(patch: Record<string, unknown>) {
     const changedTopLevelKeys = Object.keys(patch).sort();
     const details: Record<string, unknown> = { changedTopLevelKeys };
@@ -707,6 +752,32 @@ export function agentRoutes(db: Db) {
       uniqueCapabilityKeyCount: new Set(
         softwareAssignments.flatMap((assignment) => assignment.assignedCapabilityKeys ?? []),
       ).size,
+    };
+  }
+
+  function summarizeEnterpriseRelationshipsUpdate(
+    relationships: AgentEnterpriseRelationshipsRecord | null,
+    options?: { projectId?: string | null; source?: string | null },
+  ) {
+    const links = relationships?.links ?? [];
+    const customTypes = relationships?.customTypes ?? [];
+
+    return {
+      cleared: relationships === null,
+      version: relationships?.version ?? null,
+      updatedAt: relationships?.updatedAt ?? null,
+      source: options?.source ?? null,
+      projectId: options?.projectId ?? null,
+      linkCount: links.length,
+      customTypeCount: customTypes.length,
+      relationshipTypes: Array.from(new Set(links.map((link) => link.typeKey))).sort(),
+      targetAgentCount: new Set(links.map((link) => link.targetAgentId)).size,
+      customTypeKeys: customTypes.map((type) => type.key).sort(),
+      categories: Array.from(
+        new Set([
+          ...customTypes.map((type) => type.category),
+        ]),
+      ).sort(),
     };
   }
 
@@ -1763,6 +1834,77 @@ export function agentRoutes(db: Db) {
     });
   });
 
+  router.put(
+    "/agents/:id/enterprise-relationships",
+    validate(updateAgentEnterpriseRelationshipsSchema),
+    async (req, res) => {
+      const id = req.params.id as string;
+      const existing = await svc.getById(id);
+      if (!existing) {
+        res.status(404).json({ error: "Agent not found" });
+        return;
+      }
+
+      await assertCanManageEnterpriseRelationships(req, existing);
+
+      const actor = getActorInfo(req);
+      const existingMetadata = asRecord(existing.metadata) ?? {};
+      const nextMetadata: Record<string, unknown> = { ...existingMetadata };
+      const nextRelationships =
+        req.body.relationships === null
+          ? null
+          : {
+            ...req.body.relationships,
+            updatedAt: new Date().toISOString(),
+          };
+
+      if (nextRelationships === null) {
+        delete nextMetadata.enterpriseRelationships;
+      } else {
+        nextMetadata.enterpriseRelationships = nextRelationships;
+      }
+
+      const agent = await svc.update(
+        id,
+        { metadata: Object.keys(nextMetadata).length > 0 ? nextMetadata : null },
+        {
+          recordRevision: {
+            createdByAgentId: actor.agentId,
+            createdByUserId: actor.actorType === "user" ? actor.actorId : null,
+            source: "enterprise_relationships_patch",
+          },
+        },
+      );
+      if (!agent) {
+        res.status(404).json({ error: "Agent not found" });
+        return;
+      }
+
+      await logActivity(db, {
+        companyId: agent.companyId,
+        projectId: req.body.projectId ?? null,
+        actorType: actor.actorType,
+        actorId: actor.actorId,
+        agentId: actor.agentId,
+        runId: actor.runId,
+        action: "agent.enterprise_relationships_updated",
+        entityType: "agent",
+        entityId: agent.id,
+        details: summarizeEnterpriseRelationshipsUpdate(nextRelationships, {
+          projectId: req.body.projectId ?? null,
+          source: req.body.source ?? null,
+        }),
+      });
+
+      res.json({
+        agentId: agent.id,
+        companyId: agent.companyId,
+        projectId: req.body.projectId ?? null,
+        enterpriseRelationships: await svc.getEnterpriseRelationshipsView(agent.id),
+      });
+    },
+  );
+
   router.patch("/agents/:id/instructions-path", validate(updateAgentInstructionsPathSchema), async (req, res) => {
     const id = req.params.id as string;
     const existing = await svc.getById(id);
@@ -2020,6 +2162,12 @@ export function agentRoutes(db: Db) {
     if (metadataPatch && hasOwn(metadataPatch, "serviceDiscoveryCache")) {
       res.status(422).json({
         error: "Use /api/agents/:id/service-discovery-cache for deployment memory changes",
+      });
+      return;
+    }
+    if (metadataPatch && hasOwn(metadataPatch, "enterpriseRelationships")) {
+      res.status(422).json({
+        error: "Use /api/agents/:id/enterprise-relationships for secondary enterprise relationship changes",
       });
       return;
     }

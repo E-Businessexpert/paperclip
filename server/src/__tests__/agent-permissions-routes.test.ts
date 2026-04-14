@@ -32,12 +32,30 @@ const baseAgent = {
   updatedAt: new Date("2026-03-19T00:00:00.000Z"),
 };
 
+const emptyEnterpriseRelationshipsView = {
+  version: 1 as const,
+  updatedAt: null,
+  customTypes: [],
+  availableTypes: [
+    {
+      key: "dottedLineTo",
+      label: "Dotted line to",
+      description: "Advisory or matrix relationship.",
+      category: "matrix",
+      aiSemantics: null,
+      builtIn: true,
+    },
+  ],
+  links: [],
+};
+
 const mockAgentService = vi.hoisted(() => ({
   getById: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
   updatePermissions: vi.fn(),
   getChainOfCommand: vi.fn(),
+  getEnterpriseRelationshipsView: vi.fn(),
   resolveByReference: vi.fn(),
 }));
 
@@ -150,6 +168,7 @@ describe("agent permission routes", () => {
     mockGetTelemetryClient.mockReturnValue({ track: vi.fn() });
     mockAgentService.getById.mockResolvedValue(baseAgent);
     mockAgentService.getChainOfCommand.mockResolvedValue([]);
+    mockAgentService.getEnterpriseRelationshipsView.mockResolvedValue(emptyEnterpriseRelationshipsView);
     mockAgentService.resolveByReference.mockResolvedValue({ ambiguous: false, agent: baseAgent });
     mockAgentService.create.mockResolvedValue(baseAgent);
     mockAgentService.update.mockResolvedValue(baseAgent);
@@ -416,6 +435,97 @@ describe("agent permission routes", () => {
 
     expect(res.status).toBe(403);
     expect(mockHeartbeatService.cancelRun).not.toHaveBeenCalled();
+  });
+
+  it("updates enterprise relationships through the dedicated route", async () => {
+    const app = createApp({
+      type: "board",
+      userId: "board-user",
+      source: "local_implicit",
+      isInstanceAdmin: true,
+      companyIds: [companyId],
+    });
+
+    const res = await request(app)
+      .put(`/api/agents/${agentId}/enterprise-relationships`)
+      .send({
+        source: "test-suite",
+        relationships: {
+          version: 1,
+          updatedAt: null,
+          customTypes: [],
+          links: [
+            {
+              id: "link-1",
+              typeKey: "dottedLineTo",
+              targetAgentId: "33333333-3333-4333-8333-333333333333",
+              notes: "Matrix review",
+            },
+          ],
+        },
+      });
+
+    expect(res.status).toBe(200);
+    expect(mockAgentService.update).toHaveBeenCalledWith(
+      agentId,
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          enterpriseRelationships: expect.objectContaining({
+            version: 1,
+            customTypes: [],
+            links: [
+              expect.objectContaining({
+                id: "link-1",
+                typeKey: "dottedLineTo",
+                targetAgentId: "33333333-3333-4333-8333-333333333333",
+                notes: "Matrix review",
+              }),
+            ],
+          }),
+        }),
+      }),
+      expect.objectContaining({
+        recordRevision: expect.objectContaining({
+          source: "enterprise_relationships_patch",
+        }),
+      }),
+    );
+    expect(mockLogActivity).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "agent.enterprise_relationships_updated",
+        entityId: agentId,
+      }),
+    );
+  });
+
+  it("rejects generic metadata patches for enterprise relationships", async () => {
+    const app = createApp({
+      type: "board",
+      userId: "board-user",
+      source: "local_implicit",
+      isInstanceAdmin: true,
+      companyIds: [companyId],
+    });
+
+    const res = await request(app)
+      .patch(`/api/agents/${agentId}`)
+      .send({
+        metadata: {
+          enterpriseRelationships: {
+            version: 1,
+            updatedAt: null,
+            customTypes: [],
+            links: [],
+          },
+        },
+      });
+
+    expect(res.status).toBe(422);
+    expect(res.body).toEqual({
+      error: "Use /api/agents/:id/enterprise-relationships for secondary enterprise relationship changes",
+    });
+    expect(mockAgentService.update).not.toHaveBeenCalled();
   });
 
   it("writes service discovery cache through the audited route", async () => {

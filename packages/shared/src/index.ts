@@ -214,6 +214,13 @@ export type {
   DiscoveredSoftwareAssignment,
   DiscoveredServiceRecord,
   AgentServiceDiscoveryCache,
+  EnterpriseRelationshipCategory,
+  EnterpriseRelationshipTypeCustomDefinition,
+  EnterpriseRelationshipTypeDefinition,
+  AgentEnterpriseRelationshipLink,
+  AgentEnterpriseRelationshipsRecord,
+  ResolvedAgentEnterpriseRelationshipLink,
+  AgentEnterpriseRelationshipsView,
   AgentMetadataRecord,
   AgentInstructionsBundleMode,
   AgentInstructionsFileSummary,
@@ -399,6 +406,12 @@ export {
 } from "./types/instance.js";
 
 export {
+  ENTERPRISE_RELATIONSHIP_CATEGORIES,
+  BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES,
+  resolveEnterpriseRelationshipTypes,
+} from "./types/agent.js";
+
+export {
   getClosedIsolatedExecutionWorkspaceMessage,
   isClosedIsolatedExecutionWorkspace,
 } from "./execution-workspace-guards.js";
@@ -441,6 +454,11 @@ export {
   discoveredServiceRecordSchema,
   agentServiceDiscoveryCacheSchema,
   updateAgentServiceDiscoveryCacheSchema,
+  enterpriseRelationshipCategorySchema,
+  enterpriseRelationshipTypeCustomDefinitionSchema,
+  agentEnterpriseRelationshipLinkSchema,
+  agentEnterpriseRelationshipsSchema,
+  updateAgentEnterpriseRelationshipsSchema,
   agentInstructionsBundleModeSchema,
   updateAgentInstructionsBundleSchema,
   upsertAgentInstructionsFileSchema,
@@ -456,6 +474,7 @@ export {
   type CreateAgentHire,
   type UpdateAgent,
   type UpdateAgentServiceDiscoveryCache,
+  type UpdateAgentEnterpriseRelationships,
   type UpdateAgentInstructionsBundle,
   type UpsertAgentInstructionsFile,
   type UpdateAgentInstructionsPath,

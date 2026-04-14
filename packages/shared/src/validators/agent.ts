@@ -7,6 +7,7 @@ import {
 } from "../constants.js";
 import { agentAdapterTypeSchema } from "../adapter-type.js";
 import { envConfigSchema } from "./secret.js";
+import { BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES } from "../types/agent.js";
 
 export const agentPermissionsSchema = z.object({
   canCreateAgents: z.boolean().optional().default(false),
@@ -101,6 +102,113 @@ export const updateAgentServiceDiscoveryCacheSchema = z.object({
 });
 
 export type UpdateAgentServiceDiscoveryCache = z.infer<typeof updateAgentServiceDiscoveryCacheSchema>;
+
+const enterpriseRelationshipKeySchema = z
+  .string()
+  .trim()
+  .min(1)
+  .regex(/^[A-Za-z][A-Za-z0-9:_-]*$/, {
+    message: "Relationship keys must start with a letter and use only letters, numbers, :, _, or -",
+  });
+
+const builtinEnterpriseRelationshipKeys = new Set(
+  BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES.map((definition) => definition.key),
+);
+
+export const enterpriseRelationshipCategorySchema = z.enum([
+  "matrix",
+  "decision",
+  "asset",
+  "governance",
+  "custom",
+]);
+
+export const enterpriseRelationshipTypeCustomDefinitionSchema = z.object({
+  key: enterpriseRelationshipKeySchema,
+  label: z.string().trim().min(1),
+  description: z.string().trim().min(1),
+  category: enterpriseRelationshipCategorySchema,
+  aiSemantics: z.string().trim().min(1).nullable().optional().default(null),
+});
+
+export const agentEnterpriseRelationshipLinkSchema = z.object({
+  id: z.string().trim().min(1),
+  typeKey: enterpriseRelationshipKeySchema,
+  targetAgentId: z.string().uuid(),
+  notes: z.string().nullable(),
+  metadata: z.record(z.unknown()).nullable().optional(),
+});
+
+export const agentEnterpriseRelationshipsSchema = z
+  .object({
+    version: z.literal(1),
+    updatedAt: z.string().trim().min(1).nullable(),
+    customTypes: z.array(enterpriseRelationshipTypeCustomDefinitionSchema).default([]),
+    links: z.array(agentEnterpriseRelationshipLinkSchema).default([]),
+  })
+  .superRefine((value, ctx) => {
+    const customTypeKeys = new Set<string>();
+    for (const [index, customType] of value.customTypes.entries()) {
+      if (builtinEnterpriseRelationshipKeys.has(customType.key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Custom relationship key '${customType.key}' conflicts with a built-in relationship type`,
+          path: ["customTypes", index, "key"],
+        });
+      }
+      if (customTypeKeys.has(customType.key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Duplicate custom relationship key '${customType.key}'`,
+          path: ["customTypes", index, "key"],
+        });
+      }
+      customTypeKeys.add(customType.key);
+    }
+
+    const validTypeKeys = new Set([
+      ...builtinEnterpriseRelationshipKeys,
+      ...Array.from(customTypeKeys),
+    ]);
+    const linkIds = new Set<string>();
+    const linkTargets = new Set<string>();
+    for (const [index, link] of value.links.entries()) {
+      if (!validTypeKeys.has(link.typeKey)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Unknown relationship type '${link.typeKey}'`,
+          path: ["links", index, "typeKey"],
+        });
+      }
+      if (linkIds.has(link.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Duplicate relationship id '${link.id}'`,
+          path: ["links", index, "id"],
+        });
+      }
+      linkIds.add(link.id);
+
+      const pairKey = `${link.typeKey}::${link.targetAgentId}`;
+      if (linkTargets.has(pairKey)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Duplicate relationship target for the same type",
+          path: ["links", index, "targetAgentId"],
+        });
+      }
+      linkTargets.add(pairKey);
+    }
+  });
+
+export const updateAgentEnterpriseRelationshipsSchema = z.object({
+  projectId: z.string().uuid().optional().nullable(),
+  source: z.string().trim().min(1).optional().nullable(),
+  relationships: agentEnterpriseRelationshipsSchema.nullable(),
+});
+
+export type UpdateAgentEnterpriseRelationships =
+  z.infer<typeof updateAgentEnterpriseRelationshipsSchema>;
 
 export const agentInstructionsBundleModeSchema = z.enum(["managed", "external"]);
 

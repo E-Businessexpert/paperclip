@@ -17,7 +17,17 @@ import {
   issueComments,
   companies,
 } from "@paperclipai/db";
-import { isUuidLike, normalizeAgentUrlKey } from "@paperclipai/shared";
+import {
+  agentEnterpriseRelationshipsSchema,
+  isUuidLike,
+  normalizeAgentUrlKey,
+  resolveEnterpriseRelationshipTypes,
+  type AgentRole,
+  type AgentStatus,
+  type AgentEnterpriseRelationshipsRecord,
+  type AgentEnterpriseRelationshipsView,
+  type ResolvedAgentEnterpriseRelationshipLink,
+} from "@paperclipai/shared";
 import { conflict, notFound, unprocessable } from "../errors.js";
 import { normalizeAgentPermissions } from "./agent-permissions.js";
 import { REDACTED_EVENT_VALUE, sanitizeRecord } from "../redaction.js";
@@ -290,6 +300,99 @@ export function agentService(db: Db) {
     return normalizeAgentRow(hydrated);
   }
 
+  function parseEnterpriseRelationshipsRecord(
+    metadata: unknown,
+  ): AgentEnterpriseRelationshipsRecord | null {
+    const metadataRecord = isPlainRecord(metadata) ? metadata : null;
+    const rawRelationships = metadataRecord?.enterpriseRelationships;
+    if (!rawRelationships || !isPlainRecord(rawRelationships)) return null;
+    const parsed = agentEnterpriseRelationshipsSchema.safeParse(rawRelationships);
+    return parsed.success ? parsed.data : null;
+  }
+
+  function buildEnterpriseRelationshipsView(
+    record: AgentEnterpriseRelationshipsRecord | null,
+    resolvedLinks: ResolvedAgentEnterpriseRelationshipLink[],
+  ): AgentEnterpriseRelationshipsView {
+    const customTypes = record?.customTypes ?? [];
+    return {
+      version: 1,
+      updatedAt: record?.updatedAt ?? null,
+      customTypes,
+      availableTypes: resolveEnterpriseRelationshipTypes(customTypes),
+      links: resolvedLinks,
+    };
+  }
+
+  async function getEnterpriseRelationshipsView(agentId: string): Promise<AgentEnterpriseRelationshipsView> {
+    const agent = await getById(agentId);
+    if (!agent) {
+      return buildEnterpriseRelationshipsView(null, []);
+    }
+
+    const relationships = parseEnterpriseRelationshipsRecord(agent.metadata);
+    if (!relationships || relationships.links.length === 0) {
+      return buildEnterpriseRelationshipsView(relationships, []);
+    }
+
+    const typeByKey = new Map(
+      resolveEnterpriseRelationshipTypes(relationships.customTypes).map((definition) => [
+        definition.key,
+        definition,
+      ]),
+    );
+    const targetAgentIds = Array.from(
+      new Set(relationships.links.map((link) => link.targetAgentId).filter(Boolean)),
+    );
+
+    const targetRows = targetAgentIds.length
+      ? await db
+        .select({
+          id: agents.id,
+          companyId: agents.companyId,
+          name: agents.name,
+          role: agents.role,
+          title: agents.title,
+          status: agents.status,
+          companyName: companies.name,
+        })
+        .from(agents)
+        .leftJoin(companies, eq(agents.companyId, companies.id))
+        .where(inArray(agents.id, targetAgentIds))
+      : [];
+
+    const targetById = new Map(targetRows.map((row) => [row.id, row]));
+    const resolvedLinks = relationships.links
+      .map<ResolvedAgentEnterpriseRelationshipLink>((link) => {
+        const definition = typeByKey.get(link.typeKey);
+        const target = targetById.get(link.targetAgentId);
+        return {
+          ...link,
+          category: definition?.category ?? "custom",
+          builtIn: definition?.builtIn ?? false,
+          typeLabel: definition?.label ?? link.typeKey,
+          typeDescription: definition?.description ?? "Custom enterprise relationship",
+          typeAiSemantics: definition?.aiSemantics ?? null,
+          brokenTarget: !target,
+          targetAgentName: target?.name ?? null,
+          targetCompanyId: target?.companyId ?? null,
+          targetCompanyName: target?.companyName ?? null,
+          targetRole: (target?.role ?? null) as AgentRole | null,
+          targetTitle: target?.title ?? null,
+          targetStatus: (target?.status ?? null) as AgentStatus | null,
+        };
+      })
+      .sort((left, right) => {
+        const labelOrder = left.typeLabel.localeCompare(right.typeLabel);
+        if (labelOrder !== 0) return labelOrder;
+        const companyOrder = (left.targetCompanyName ?? "").localeCompare(right.targetCompanyName ?? "");
+        if (companyOrder !== 0) return companyOrder;
+        return (left.targetAgentName ?? "").localeCompare(right.targetAgentName ?? "");
+      });
+
+    return buildEnterpriseRelationshipsView(relationships, resolvedLinks);
+  }
+
   async function ensureManager(_companyId: string, managerId: string) {
     const manager = await getById(managerId);
     if (!manager) throw notFound("Manager not found");
@@ -372,6 +475,34 @@ export function agentService(db: Db) {
     if (data.permissions !== undefined) {
       const role = (data.role ?? existing.role) as string;
       normalizedPatch.permissions = normalizeAgentPermissions(data.permissions, role);
+    }
+    if (data.metadata !== undefined) {
+      if (data.metadata !== null && !isPlainRecord(data.metadata)) {
+        throw unprocessable("metadata must be an object or null");
+      }
+
+      const nextMetadata = isPlainRecord(data.metadata) ? { ...data.metadata } : null;
+      const rawEnterpriseRelationships = nextMetadata?.enterpriseRelationships;
+      if (rawEnterpriseRelationships !== undefined) {
+        if (!nextMetadata) {
+          throw unprocessable("metadata.enterpriseRelationships requires metadata to be an object");
+        }
+        if (rawEnterpriseRelationships === null) {
+          delete nextMetadata.enterpriseRelationships;
+        } else {
+          const parsed = agentEnterpriseRelationshipsSchema.safeParse(rawEnterpriseRelationships);
+          if (!parsed.success) {
+            const firstIssue = parsed.error.issues[0];
+            throw unprocessable(
+              `Invalid enterprise relationships metadata${firstIssue?.message ? `: ${firstIssue.message}` : ""}`,
+            );
+          }
+          nextMetadata.enterpriseRelationships = parsed.data;
+        }
+      }
+
+      normalizedPatch.metadata =
+        nextMetadata && Object.keys(nextMetadata).length > 0 ? nextMetadata : null;
     }
 
     const shouldRecordRevision = Boolean(options?.recordRevision) && hasConfigPatchFields(normalizedPatch);
@@ -458,9 +589,41 @@ export function agentService(db: Db) {
 
       const role = data.role ?? "general";
       const normalizedPermissions = normalizeAgentPermissions(data.permissions, role);
+      let normalizedMetadata: Record<string, unknown> | null | undefined = data.metadata ?? null;
+      if (normalizedMetadata !== null && !isPlainRecord(normalizedMetadata)) {
+        throw unprocessable("metadata must be an object or null");
+      }
+      if (normalizedMetadata && normalizedMetadata.enterpriseRelationships !== undefined) {
+        if (normalizedMetadata.enterpriseRelationships === null) {
+          const nextMetadata = { ...normalizedMetadata };
+          delete nextMetadata.enterpriseRelationships;
+          normalizedMetadata = Object.keys(nextMetadata).length > 0 ? nextMetadata : null;
+        } else {
+          const parsed = agentEnterpriseRelationshipsSchema.safeParse(
+            normalizedMetadata.enterpriseRelationships,
+          );
+          if (!parsed.success) {
+            const firstIssue = parsed.error.issues[0];
+            throw unprocessable(
+              `Invalid enterprise relationships metadata${firstIssue?.message ? `: ${firstIssue.message}` : ""}`,
+            );
+          }
+          normalizedMetadata = {
+            ...normalizedMetadata,
+            enterpriseRelationships: parsed.data,
+          };
+        }
+      }
       const created = await db
         .insert(agents)
-        .values({ ...data, name: uniqueName, companyId, role, permissions: normalizedPermissions })
+        .values({
+          ...data,
+          metadata: normalizedMetadata,
+          name: uniqueName,
+          companyId,
+          role,
+          permissions: normalizedPermissions,
+        })
         .returning()
         .then((rows) => rows[0]);
 
@@ -538,6 +701,40 @@ export function agentService(db: Db) {
 
       return db.transaction(async (tx) => {
         await tx.update(agents).set({ reportsTo: null }).where(eq(agents.reportsTo, id));
+        const agentsWithRelationshipLinks = await tx
+          .select({
+            id: agents.id,
+            metadata: agents.metadata,
+          })
+          .from(agents)
+          .where(ne(agents.id, id));
+
+        for (const row of agentsWithRelationshipLinks) {
+          const relationships = parseEnterpriseRelationshipsRecord(row.metadata);
+          if (!relationships || relationships.links.length === 0) continue;
+
+          const nextLinks = relationships.links.filter((link) => link.targetAgentId !== id);
+          if (nextLinks.length === relationships.links.length) continue;
+
+          const metadataRecord = isPlainRecord(row.metadata) ? { ...row.metadata } : {};
+          if (nextLinks.length === 0 && relationships.customTypes.length === 0) {
+            delete metadataRecord.enterpriseRelationships;
+          } else {
+            metadataRecord.enterpriseRelationships = {
+              ...relationships,
+              links: nextLinks,
+              updatedAt: new Date().toISOString(),
+            };
+          }
+
+          await tx
+            .update(agents)
+            .set({
+              metadata: Object.keys(metadataRecord).length > 0 ? metadataRecord : null,
+              updatedAt: new Date(),
+            })
+            .where(eq(agents.id, row.id));
+        }
         await tx
           .update(issues)
           .set({ assigneeAgentId: null, createdByAgentId: null })
@@ -814,6 +1011,8 @@ export function agentService(db: Db) {
         title: entry.title,
       }));
     },
+
+    getEnterpriseRelationshipsView,
 
     runningForAgent: (agentId: string) =>
       db

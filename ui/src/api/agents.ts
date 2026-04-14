@@ -1,6 +1,8 @@
 import type {
   Agent,
   AgentDetail,
+  AgentEnterpriseRelationshipsRecord,
+  AgentEnterpriseRelationshipsView,
   AgentInstructionsBundle,
   AgentInstructionsFileDetail,
   AgentSkillSnapshot,
@@ -74,6 +76,13 @@ export interface AgentPermissionUpdate {
   canGenerateSystemTopology?: boolean;
 }
 
+export interface AgentEnterpriseRelationshipsUpdateResponse {
+  agentId: string;
+  companyId: string;
+  projectId: string | null;
+  enterpriseRelationships: AgentEnterpriseRelationshipsView;
+}
+
 function withCompanyScope(path: string, companyId?: string) {
   if (!companyId) return path;
   const separator = path.includes("?") ? "&" : "?";
@@ -132,6 +141,19 @@ export const agentsApi = {
     api.patch<Agent>(agentPath(id, companyId), data),
   updatePermissions: (id: string, data: AgentPermissionUpdate, companyId?: string) =>
     api.patch<AgentDetail>(agentPath(id, companyId, "/permissions"), data),
+  updateEnterpriseRelationships: (
+    id: string,
+    data: {
+      projectId?: string | null;
+      source?: string | null;
+      relationships: AgentEnterpriseRelationshipsRecord | null;
+    },
+    companyId?: string,
+  ) =>
+    api.put<AgentEnterpriseRelationshipsUpdateResponse>(
+      agentPath(id, companyId, "/enterprise-relationships"),
+      data,
+    ),
   instructionsBundle: (id: string, companyId?: string) =>
     api.get<AgentInstructionsBundle>(agentPath(id, companyId, "/instructions-bundle")),
   updateInstructionsBundle: (

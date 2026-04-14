@@ -55,6 +55,13 @@ export type {
   DiscoveredSoftwareAssignment,
   DiscoveredServiceRecord,
   AgentServiceDiscoveryCache,
+  EnterpriseRelationshipCategory,
+  EnterpriseRelationshipTypeCustomDefinition,
+  EnterpriseRelationshipTypeDefinition,
+  AgentEnterpriseRelationshipLink,
+  AgentEnterpriseRelationshipsRecord,
+  ResolvedAgentEnterpriseRelationshipLink,
+  AgentEnterpriseRelationshipsView,
   AgentMetadataRecord,
   AgentInstructionsBundleMode,
   AgentInstructionsFileSummary,
@@ -66,6 +73,11 @@ export type {
   AdapterEnvironmentTestStatus,
   AdapterEnvironmentCheck,
   AdapterEnvironmentTestResult,
+} from "./agent.js";
+export {
+  ENTERPRISE_RELATIONSHIP_CATEGORIES,
+  BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES,
+  resolveEnterpriseRelationshipTypes,
 } from "./agent.js";
 export type { AssetImage } from "./asset.js";
 export type { Project, ProjectCodebase, ProjectCodebaseOrigin, ProjectGoalRef, ProjectWorkspace } from "./project.js";
