@@ -1605,6 +1605,11 @@ function ConfigurationTab({
   }, [onSavingChange, isConfigSaving]);
 
   const canCreateAgents = Boolean(agent.permissions?.canCreateAgents);
+  const canDesignOrganizations = Boolean(agent.permissions?.canDesignOrganizations);
+  const canManageRelationshipTypes = Boolean(agent.permissions?.canManageRelationshipTypes);
+  const canManageServiceDiscovery = Boolean(agent.permissions?.canManageServiceDiscovery);
+  const canManageDeploymentAssignments = Boolean(agent.permissions?.canManageDeploymentAssignments);
+  const canGenerateSystemTopology = Boolean(agent.permissions?.canGenerateSystemTopology);
   const canAssignTasks = Boolean(agent.access?.canAssignTasks);
   const taskAssignSource = agent.access?.taskAssignSource ?? "none";
   const taskAssignLocked = agent.role === "ceo" || canCreateAgents;
@@ -1616,6 +1621,73 @@ function ConfigurationTab({
         : taskAssignSource === "explicit_grant"
           ? "Enabled via explicit company permission grant."
           : "Disabled unless explicitly granted.";
+  type SystemPermissionKey =
+    | "canDesignOrganizations"
+    | "canManageRelationshipTypes"
+    | "canManageServiceDiscovery"
+    | "canManageDeploymentAssignments"
+    | "canGenerateSystemTopology";
+  const buildPermissionUpdate = (overrides: Partial<AgentPermissionUpdate>): AgentPermissionUpdate => ({
+    canCreateAgents,
+    canAssignTasks,
+    canDesignOrganizations,
+    canManageRelationshipTypes,
+    canManageServiceDiscovery,
+    canManageDeploymentAssignments,
+    canGenerateSystemTopology,
+    ...overrides,
+  });
+  const toggleSystemPermission = (key: SystemPermissionKey, value: boolean) => {
+    switch (key) {
+      case "canDesignOrganizations":
+        updatePermissions.mutate(buildPermissionUpdate({ canDesignOrganizations: value }));
+        return;
+      case "canManageRelationshipTypes":
+        updatePermissions.mutate(buildPermissionUpdate({ canManageRelationshipTypes: value }));
+        return;
+      case "canManageServiceDiscovery":
+        updatePermissions.mutate(buildPermissionUpdate({ canManageServiceDiscovery: value }));
+        return;
+      case "canManageDeploymentAssignments":
+        updatePermissions.mutate(buildPermissionUpdate({ canManageDeploymentAssignments: value }));
+        return;
+      case "canGenerateSystemTopology":
+        updatePermissions.mutate(buildPermissionUpdate({ canGenerateSystemTopology: value }));
+        return;
+    }
+  };
+  const systemPermissionRows = [
+    {
+      key: "canDesignOrganizations" as const,
+      label: "Can design organizations",
+      description: "Lets this agent generate companies, departments, teams, hierarchies, and nested app structures.",
+      checked: canDesignOrganizations,
+    },
+    {
+      key: "canManageRelationshipTypes" as const,
+      label: "Can manage relationship types",
+      description: "Lets this agent define or update enterprise relationship semantics such as approvals, dotted lines, allocation, and governance links.",
+      checked: canManageRelationshipTypes,
+    },
+    {
+      key: "canManageServiceDiscovery" as const,
+      label: "Can manage service discovery",
+      description: "Lets this agent write virtual and physical service discovery data into the shared awareness cache.",
+      checked: canManageServiceDiscovery,
+    },
+    {
+      key: "canManageDeploymentAssignments" as const,
+      label: "Can manage deployment assignments",
+      description: "Lets this agent record which deployed software, tools, and dependencies each service or agent should be aware of.",
+      checked: canManageDeploymentAssignments,
+    },
+    {
+      key: "canGenerateSystemTopology" as const,
+      label: "Can generate system topology",
+      description: "Lets this agent generate enterprise graph, topology, and orchestration views from the current design and discovery data.",
+      checked: canGenerateSystemTopology,
+    },
+  ];
 
   return (
     <div className="space-y-6">
@@ -1641,17 +1713,25 @@ function ConfigurationTab({
             <div className="space-y-1">
               <div>Can create new agents</div>
               <p className="text-xs text-muted-foreground">
-                Lets this agent create or hire agents and implicitly assign tasks.
+                Lets this agent create or hire agents, implicitly assign tasks, and auto-enables the system design permissions below.
               </p>
             </div>
             <ToggleSwitch
               checked={canCreateAgents}
-              onCheckedChange={() =>
-                updatePermissions.mutate({
-                  canCreateAgents: !canCreateAgents,
-                  canAssignTasks: !canCreateAgents ? true : canAssignTasks,
-                })
-              }
+              onCheckedChange={() => {
+                const nextCanCreateAgents = !canCreateAgents;
+                updatePermissions.mutate(buildPermissionUpdate({
+                  canCreateAgents: nextCanCreateAgents,
+                  canAssignTasks: nextCanCreateAgents ? true : canAssignTasks,
+                  ...(nextCanCreateAgents ? {
+                    canDesignOrganizations: true,
+                    canManageRelationshipTypes: true,
+                    canManageServiceDiscovery: true,
+                    canManageDeploymentAssignments: true,
+                    canGenerateSystemTopology: true,
+                  } : {}),
+                }));
+              }}
               disabled={updatePermissions.isPending}
             />
           </div>
@@ -1664,15 +1744,25 @@ function ConfigurationTab({
             </div>
             <ToggleSwitch
               checked={canAssignTasks}
-              onCheckedChange={() =>
-                updatePermissions.mutate({
-                  canCreateAgents,
-                  canAssignTasks: !canAssignTasks,
-                })
-              }
+              onCheckedChange={() => updatePermissions.mutate(buildPermissionUpdate({ canAssignTasks: !canAssignTasks }))}
               disabled={updatePermissions.isPending || taskAssignLocked}
             />
           </div>
+          {systemPermissionRows.map((permission) => (
+            <div key={permission.key} className="flex items-center justify-between gap-4 text-sm">
+              <div className="space-y-1">
+                <div>{permission.label}</div>
+                <p className="text-xs text-muted-foreground">
+                  {permission.description}
+                </p>
+              </div>
+              <ToggleSwitch
+                checked={permission.checked}
+                onCheckedChange={() => toggleSystemPermission(permission.key, !permission.checked)}
+                disabled={updatePermissions.isPending}
+              />
+            </div>
+          ))}
         </div>
       </div>
     </div>

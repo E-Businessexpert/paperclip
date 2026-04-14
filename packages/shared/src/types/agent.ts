@@ -11,6 +11,89 @@ import type {
 
 export interface AgentPermissions {
   canCreateAgents: boolean;
+  canDesignOrganizations?: boolean;
+  canManageRelationshipTypes?: boolean;
+  canManageServiceDiscovery?: boolean;
+  canManageDeploymentAssignments?: boolean;
+  canGenerateSystemTopology?: boolean;
+}
+
+export type DiscoveredServiceKind = "virtual" | "physical" | "hybrid";
+export type DiscoveredServiceHostKind =
+  | "container"
+  | "vm"
+  | "server"
+  | "workstation"
+  | "network_device"
+  | "hypervisor"
+  | "saas"
+  | "facility"
+  | "cloud_service"
+  | "other";
+export type DiscoveredServiceLifecycleState =
+  | "planned"
+  | "active"
+  | "degraded"
+  | "retired"
+  | "unknown";
+export type DiscoveredSoftwareAssignmentKind =
+  | "software_deployed"
+  | "tool_available"
+  | "runtime_dependency"
+  | "service_dependency"
+  | "data_dependency"
+  | "network_dependency"
+  | "facility_dependency"
+  | "asset_assignment"
+  | "other";
+
+export interface DiscoveredSoftwareAssignment {
+  id: string;
+  name: string;
+  category: string | null;
+  assignmentKind: DiscoveredSoftwareAssignmentKind;
+  version: string | null;
+  environment: string | null;
+  endpoint: string | null;
+  ports: number[];
+  assignedAgentIds: string[];
+  assignedCapabilityKeys: string[];
+  notes: string | null;
+  tags: string[];
+  lastObservedAt: string | null;
+}
+
+export interface DiscoveredServiceRecord {
+  id: string;
+  name: string;
+  kind: DiscoveredServiceKind;
+  hostKind: DiscoveredServiceHostKind;
+  lifecycleState: DiscoveredServiceLifecycleState;
+  environment: string | null;
+  source: string | null;
+  systemOfRecord: string | null;
+  hostRef: string | null;
+  ownerCompanyId: string | null;
+  ownerCompanyName: string | null;
+  summary: string | null;
+  endpoint: string | null;
+  ports: number[];
+  tags: string[];
+  lastDiscoveredAt: string | null;
+  lastValidatedAt: string | null;
+  softwareAssignments: DiscoveredSoftwareAssignment[];
+  metadata?: Record<string, unknown> | null;
+}
+
+export interface AgentServiceDiscoveryCache {
+  version: 1;
+  cachedAt: string | null;
+  scope: string | null;
+  services: DiscoveredServiceRecord[];
+}
+
+export interface AgentMetadataRecord extends Record<string, unknown> {
+  serviceDiscoveryCache?: AgentServiceDiscoveryCache;
 }
 
 export type AgentInstructionsBundleMode = "managed" | "external";
@@ -81,7 +164,7 @@ export interface Agent {
   pausedAt: Date | null;
   permissions: AgentPermissions;
   lastHeartbeatAt: Date | null;
-  metadata: Record<string, unknown> | null;
+  metadata: AgentMetadataRecord | null;
   createdAt: Date;
   updatedAt: Date;
 }

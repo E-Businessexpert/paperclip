@@ -1617,11 +1617,16 @@ export function agentRoutes(db: Db) {
       action: "agent.permissions_updated",
       entityType: "agent",
       entityId: agent.id,
-      details: {
-        canCreateAgents: agent.permissions?.canCreateAgents ?? false,
-        canAssignTasks: effectiveCanAssignTasks,
-      },
-    });
+        details: {
+          canCreateAgents: agent.permissions?.canCreateAgents ?? false,
+          canDesignOrganizations: agent.permissions?.canDesignOrganizations ?? false,
+          canManageRelationshipTypes: agent.permissions?.canManageRelationshipTypes ?? false,
+          canManageServiceDiscovery: agent.permissions?.canManageServiceDiscovery ?? false,
+          canManageDeploymentAssignments: agent.permissions?.canManageDeploymentAssignments ?? false,
+          canGenerateSystemTopology: agent.permissions?.canGenerateSystemTopology ?? false,
+          canAssignTasks: effectiveCanAssignTasks,
+        },
+      });
 
     res.json(await buildAgentDetail(agent));
   });

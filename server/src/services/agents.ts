@@ -580,7 +580,17 @@ export function agentService(db: Db) {
       return updated ? normalizeAgentRow(updated) : null;
     },
 
-    updatePermissions: async (id: string, permissions: { canCreateAgents: boolean }) => {
+    updatePermissions: async (
+      id: string,
+      permissions: {
+        canCreateAgents: boolean;
+        canDesignOrganizations?: boolean;
+        canManageRelationshipTypes?: boolean;
+        canManageServiceDiscovery?: boolean;
+        canManageDeploymentAssignments?: boolean;
+        canGenerateSystemTopology?: boolean;
+      },
+    ) => {
       const existing = await getById(id);
       if (!existing) return null;
 
