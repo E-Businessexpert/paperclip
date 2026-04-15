@@ -26,6 +26,12 @@ import { agentsApi, type AgentDirectoryEntry, type OrgNode } from "../api/agents
 import { getAdapterLabel } from "../adapters/adapter-display-registry";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
 import { useCompany } from "../context/CompanyContext";
+import {
+  buildOrgChartExportBaseName,
+  downloadOrgChartExport,
+  type OrgChartExportFormat,
+  type OrgChartExportPayload,
+} from "../lib/org-chart-export";
 import { queryKeys } from "../lib/queryKeys";
 import { agentUrl, cn } from "../lib/utils";
 
@@ -94,6 +100,118 @@ interface CompanyGroup {
   nodeCount: number;
   external: boolean;
   accentColor: string;
+}
+
+interface ExportMenuButtonProps {
+  open: boolean;
+  busyFormat: OrgChartExportFormat | null;
+  error: string | null;
+  menuRef: React.RefObject<HTMLDivElement | null>;
+  onToggle: () => void;
+  onExport: (format: OrgChartExportFormat) => void;
+}
+
+const structureExportOptions: Array<{
+  format: OrgChartExportFormat;
+  label: string;
+  description: string;
+}> = [
+  {
+    format: "png",
+    label: "PNG",
+    description: "Image snapshot with the current structure layout.",
+  },
+  {
+    format: "jpeg",
+    label: "JPEG",
+    description: "Compressed image snapshot for quick sharing.",
+  },
+  {
+    format: "pdf",
+    label: "PDF",
+    description: "Single-page document snapshot of the current view.",
+  },
+  {
+    format: "docx",
+    label: "DOCX",
+    description: "Word document outline of the visible structure.",
+  },
+  {
+    format: "mermaid",
+    label: "Mermaid",
+    description: "Flowchart source for documentation and handoff.",
+  },
+  {
+    format: "json",
+    label: "JSON",
+    description: "Structured export of nodes, edges, groups, and metadata.",
+  },
+];
+
+function ExportMenuButton({
+  open,
+  busyFormat,
+  error,
+  menuRef,
+  onToggle,
+  onExport,
+}: ExportMenuButtonProps) {
+  return (
+    <div ref={menuRef} className="relative">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={onToggle}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <Download className="mr-1.5 h-3.5 w-3.5" />
+        Export structure
+      </Button>
+
+      {open ? (
+        <div className="absolute right-0 top-11 z-30 w-[320px] rounded-2xl border border-border/70 bg-background/96 p-2 shadow-2xl backdrop-blur dark:border-white/10 dark:bg-slate-950/94">
+          <div className="border-b border-border/60 px-2 pb-2 dark:border-white/10">
+            <div className="text-sm font-semibold text-foreground">Export current structure</div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              The download follows the current visible hierarchy or enterprise view.
+            </div>
+          </div>
+
+          <div className="mt-2 grid gap-1">
+            {structureExportOptions.map((option) => {
+              const busy = busyFormat === option.format;
+              return (
+                <button
+                  key={option.format}
+                  type="button"
+                  className="rounded-xl border border-transparent px-3 py-2 text-left transition-colors hover:border-foreground/10 hover:bg-accent/70 disabled:cursor-wait disabled:opacity-70"
+                  disabled={busyFormat !== null}
+                  onClick={() => onExport(option.format)}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium text-foreground">{option.label}</span>
+                    <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                      {busy ? "Exporting" : "Ready"}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    {option.description}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {error ? (
+            <div className="mt-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+              {error}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 const relationshipCategoryLabels: Record<EnterpriseRelationshipCategory, string> = {
@@ -392,6 +510,7 @@ export function OrgChart({
   const { setBreadcrumbs } = useBreadcrumbs();
   const navigate = useNavigate();
   const containerRef = useRef<HTMLDivElement>(null);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
   const dragStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
   const hasInitialized = useRef(false);
 
@@ -405,6 +524,9 @@ export function OrgChart({
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [dragging, setDragging] = useState(false);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [exportingFormat, setExportingFormat] = useState<OrgChartExportFormat | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const chartAccent = selectedCompany?.brandColor ?? "#60a5fa";
   const effectiveViewMode = lockViewMode ?? viewMode;
@@ -464,6 +586,21 @@ export function OrgChart({
   useEffect(() => {
     setCollapsedNodeIds(new Set());
   }, [selectedCompanyId, effectiveViewMode]);
+
+  useEffect(() => {
+    if (!exportMenuOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (!exportMenuRef.current?.contains(target)) {
+        setExportMenuOpen(false);
+      }
+    };
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    return () => window.removeEventListener("pointerdown", handlePointerDown);
+  }, [exportMenuOpen]);
 
   const mergedAgentMap = useMemo(() => {
     const map = new Map<string, AgentDirectoryEntry>();
@@ -703,6 +840,72 @@ export function OrgChart({
     [pan, zoom],
   );
 
+  const createExportPayload = useCallback((): OrgChartExportPayload => {
+    const generatedAt = new Date();
+    const companyName = selectedCompany?.name ?? "Selected company";
+
+    return {
+      fileBaseName: buildOrgChartExportBaseName(companyName, pageTitle, effectiveViewMode, generatedAt),
+      title: pageTitle,
+      subtitle: pageSubtitle,
+      companyId: selectedCompanyId!,
+      companyName,
+      viewMode: effectiveViewMode,
+      generatedAt: generatedAt.toISOString(),
+      chartAccent,
+      relationshipFilter:
+        relationshipCategoryFilter === "all"
+          ? "all"
+          : relationshipCategoryLabels[relationshipCategoryFilter],
+      bounds,
+      roots: activeRoots,
+      nodes: allNodes,
+      hierarchyEdges,
+      secondaryEdges,
+      companyGroups,
+      workflowPacks: enterpriseGraph?.workflowPacks ?? [],
+    };
+  }, [
+    activeRoots,
+    allNodes,
+    bounds,
+    chartAccent,
+    companyGroups,
+    effectiveViewMode,
+    enterpriseGraph?.workflowPacks,
+    hierarchyEdges,
+    pageSubtitle,
+    pageTitle,
+    relationshipCategoryFilter,
+    secondaryEdges,
+    selectedCompany?.name,
+    selectedCompanyId,
+  ]);
+
+  const handleExportMenuToggle = useCallback(() => {
+    setExportError(null);
+    setExportMenuOpen((previous) => !previous);
+  }, []);
+
+  const handleStructureExport = useCallback(
+    async (format: OrgChartExportFormat) => {
+      setExportingFormat(format);
+      setExportError(null);
+
+      try {
+        await downloadOrgChartExport(format, createExportPayload());
+        setExportMenuOpen(false);
+      } catch (error) {
+        setExportError(
+          error instanceof Error ? error.message : "The structure export could not be generated.",
+        );
+      } finally {
+        setExportingFormat(null);
+      }
+    },
+    [createExportPayload],
+  );
+
   if (!selectedCompanyId) {
     return <EmptyState icon={Network} message="Select a company to view the org chart." />;
   }
@@ -747,6 +950,17 @@ export function OrgChart({
               <div className="truncate text-xs text-muted-foreground">{pageSubtitle}</div>
             </div>
           </div>
+
+          <div className="flex items-center gap-2">
+            <ExportMenuButton
+              open={exportMenuOpen}
+              busyFormat={exportingFormat}
+              error={exportError}
+              menuRef={exportMenuRef}
+              onToggle={handleExportMenuToggle}
+              onExport={handleStructureExport}
+            />
+          </div>
         </div>
       ) : null}
 
@@ -765,6 +979,14 @@ export function OrgChart({
                 Export company
               </Button>
             </Link>
+            <ExportMenuButton
+              open={exportMenuOpen}
+              busyFormat={exportingFormat}
+              error={exportError}
+              menuRef={exportMenuRef}
+              onToggle={handleExportMenuToggle}
+              onExport={handleStructureExport}
+            />
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
