@@ -372,7 +372,7 @@ function OrgTreeNode({
       </Link>
       {node.reports && node.reports.length > 0 && (
         <div className="border-l border-border/50 ml-4">
-          {node.reports.map((child) => (
+          {node.reports.map((child: OrgNode) => (
             <OrgTreeNode key={child.id} node={child} depth={depth + 1} agentMap={agentMap} liveRunByAgent={liveRunByAgent} tab={tab} />
           ))}
         </div>

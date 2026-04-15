@@ -129,6 +129,18 @@ export interface EnterpriseRelationshipTemplatePackDefinition {
   aiSemantics: string | null;
 }
 
+export interface EnterpriseWorkflowPackDefinition {
+  key: string;
+  label: string;
+  description: string;
+  appliesTo: string;
+  stageLabels: string[];
+  relationshipTypeKeys: string[];
+  discoveryExpectations: string[];
+  actionLogExpectations: string[];
+  aiSemantics: string | null;
+}
+
 export interface AgentEnterpriseRelationshipLink {
   id: string;
   typeKey: string;
@@ -166,6 +178,50 @@ export interface AgentEnterpriseRelationshipsView {
   customTypes: EnterpriseRelationshipTypeCustomDefinition[];
   availableTypes: EnterpriseRelationshipTypeDefinition[];
   links: ResolvedAgentEnterpriseRelationshipLink[];
+}
+
+export interface EnterpriseGraphOrgNode {
+  id: string;
+  name: string;
+  role: string;
+  status: string;
+  companyId?: string;
+  companyName?: string | null;
+  externalToCompany?: boolean;
+  reports: EnterpriseGraphOrgNode[];
+}
+
+export interface EnterpriseGraphNode extends Agent {
+  companyName?: string | null;
+  externalToCompany?: boolean;
+  secondaryLinkCount?: number;
+}
+
+export interface EnterpriseGraphLink {
+  id: string;
+  sourceAgentId: string;
+  sourceAgentName: string;
+  sourceCompanyId: string;
+  sourceCompanyName: string | null;
+  targetAgentId: string;
+  targetAgentName: string;
+  targetCompanyId: string;
+  targetCompanyName: string | null;
+  typeKey: string;
+  typeLabel: string;
+  typeDescription: string;
+  category: EnterpriseRelationshipCategory;
+  builtIn: boolean;
+  notes: string | null;
+}
+
+export interface EnterpriseGraphView {
+  companyId: string;
+  roots: EnterpriseGraphOrgNode[];
+  nodes: EnterpriseGraphNode[];
+  links: EnterpriseGraphLink[];
+  availableTypes: EnterpriseRelationshipTypeDefinition[];
+  workflowPacks: EnterpriseWorkflowPackDefinition[];
 }
 
 export const BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES: readonly EnterpriseRelationshipTypeDefinition[] =
@@ -455,6 +511,141 @@ export const BUILTIN_ENTERPRISE_RELATIONSHIP_TEMPLATE_PACKS: readonly Enterprise
       ],
       aiSemantics:
         "Use this pack when the enterprise model needs explicit ownership and compliance review semantics around data, policy, and control functions.",
+    },
+  ] as const;
+
+export const BUILTIN_ENTERPRISE_WORKFLOW_PACKS: readonly EnterpriseWorkflowPackDefinition[] =
+  [
+    {
+      key: "standard_shared_saas",
+      label: "Standard shared SaaS",
+      description:
+        "Use for customers consuming an already deployed shared SaaS application without a dedicated instance or custom engineering path.",
+      appliesTo:
+        "Shared SaaS onboarding, customer success, tenant operations, and recurring service support inside the existing shared platform.",
+      stageLabels: [
+        "Customer intake",
+        "Tenant activation",
+        "Shared service operations",
+        "Customer success",
+      ],
+      relationshipTypeKeys: [
+        "clientOf",
+        "serviceProviderFor",
+        "statusReportedTo",
+        "mustInform",
+      ],
+      discoveryExpectations: [
+        "Reuse the standing shared deployment awareness cache.",
+        "Reference the shared tenant, platform, and dependency inventory instead of requesting new infrastructure discovery.",
+      ],
+      actionLogExpectations: [
+        "Log the customer-facing event at the company level.",
+        "Log the tenant or instance event at the project or service lane only when the action changes shared SaaS state.",
+      ],
+      aiSemantics:
+        "Route normal shared SaaS work through the standing operator and support chain without escalating to dedicated provisioning lanes unless an exception appears.",
+    },
+    {
+      key: "dedicated_managed_instance",
+      label: "Dedicated managed instance",
+      description:
+        "Use when a customer needs a separate managed tenant, dedicated hosting shape, or exception-approved provisioning path.",
+      appliesTo:
+        "Dedicated instances, premium managed environments, special hosting requests, and controlled exception routing through the shared delivery bridge.",
+      stageLabels: [
+        "Commercial approval",
+        "Shared delivery bridge",
+        "Provisioning and allocation",
+        "Instance validation",
+        "Managed handoff",
+      ],
+      relationshipTypeKeys: [
+        "approvalsRequiredFrom",
+        "serviceProviderFor",
+        "assetAllocatedBy",
+        "licensesFrom",
+        "hostedBy",
+        "statusReportedTo",
+      ],
+      discoveryExpectations: [
+        "Write a dedicated environment record into service discovery.",
+        "Record the assigned software, runtime dependencies, and hosting endpoints for the new instance.",
+      ],
+      actionLogExpectations: [
+        "Log each provisioning and approval step at both company and project scope.",
+        "Preserve the final deployment assignment record for later agent reuse.",
+      ],
+      aiSemantics:
+        "Escalate to the shared delivery and allocation path when a separate instance is required, and capture the dedicated deployment state for future automation.",
+    },
+    {
+      key: "enterprise_custom",
+      label: "Enterprise custom",
+      description:
+        "Use for custom-plan customers that need tailored workflows, additional approvals, or Labs engineering involvement beyond standard service delivery.",
+      appliesTo:
+        "Enterprise custom plans, bespoke integrations, tailored deployments, custom code, and high-touch shared-services coordination.",
+      stageLabels: [
+        "Sales and scope",
+        "Group orchestration",
+        "Labs engineering",
+        "Infrastructure and licensing",
+        "Release and acceptance",
+      ],
+      relationshipTypeKeys: [
+        "approvalsRequiredFrom",
+        "dottedLineTo",
+        "serviceProviderFor",
+        "clientOf",
+        "assetAllocatedBy",
+        "licensesFrom",
+        "governedBy",
+        "statusReportedTo",
+      ],
+      discoveryExpectations: [
+        "Create or update dedicated discovery records for custom environments and dependencies.",
+        "Write the resulting software assignment map back into the reusable deployment-awareness cache.",
+      ],
+      actionLogExpectations: [
+        "Log every scoped decision at company, project, and release level.",
+        "Keep the acceptance and release evidence tied to the custom project for future audits and reuse.",
+      ],
+      aiSemantics:
+        "Treat the operating company as the client-facing owner, route delivery through the Group bridge, involve Labs for product and custom engineering, and involve asset allocators only when dedicated hosting or licensing is required.",
+    },
+    {
+      key: "ecommerce_website_cpanel",
+      label: "E-commerce website / cPanel",
+      description:
+        "Use for websites or retail workloads that usually live on shared hosting or cPanel, but may escalate into dedicated infrastructure when needed.",
+      appliesTo:
+        "E-commerce websites, cPanel-based hosting, retail site operations, and lightweight managed web deployments.",
+      stageLabels: [
+        "Retail intake",
+        "Software routing",
+        "Shared hosting assignment",
+        "Website launch",
+        "Support and care",
+      ],
+      relationshipTypeKeys: [
+        "clientOf",
+        "serviceProviderFor",
+        "licensesFrom",
+        "assetAllocatedBy",
+        "supports",
+        "mustInform",
+      ],
+      discoveryExpectations: [
+        "Record the cPanel account or shared hosting target in service discovery.",
+        "Escalate to dedicated server and license assignments only when the website leaves the shared hosting lane.",
+      ],
+      actionLogExpectations: [
+        "Log the originating retail request in the operating company lane.",
+        "Log shared-hosting or dedicated-hosting changes in the linked software and infrastructure project scopes.",
+      ],
+      aiSemantics:
+        "Keep routine website and shared-hosting work in the operating lane, but route dedicated hosting and separate licensing back through the shared service bridge when the website needs its own infrastructure footprint.",
     },
   ] as const;
 

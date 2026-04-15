@@ -218,10 +218,15 @@ export type {
   EnterpriseRelationshipTypeCustomDefinition,
   EnterpriseRelationshipTypeDefinition,
   EnterpriseRelationshipTemplatePackDefinition,
+  EnterpriseWorkflowPackDefinition,
   AgentEnterpriseRelationshipLink,
   AgentEnterpriseRelationshipsRecord,
   ResolvedAgentEnterpriseRelationshipLink,
   AgentEnterpriseRelationshipsView,
+  EnterpriseGraphOrgNode,
+  EnterpriseGraphNode,
+  EnterpriseGraphLink,
+  EnterpriseGraphView,
   AgentMetadataRecord,
   AgentInstructionsBundleMode,
   AgentInstructionsFileSummary,
@@ -410,6 +415,7 @@ export {
   ENTERPRISE_RELATIONSHIP_CATEGORIES,
   BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES,
   BUILTIN_ENTERPRISE_RELATIONSHIP_TEMPLATE_PACKS,
+  BUILTIN_ENTERPRISE_WORKFLOW_PACKS,
   resolveEnterpriseRelationshipTypes,
 } from "./types/agent.js";
 

@@ -19,6 +19,7 @@ import {
 } from "@paperclipai/db";
 import {
   agentEnterpriseRelationshipsSchema,
+  BUILTIN_ENTERPRISE_WORKFLOW_PACKS,
   isUuidLike,
   normalizeAgentUrlKey,
   resolveEnterpriseRelationshipTypes,
@@ -26,6 +27,12 @@ import {
   type AgentStatus,
   type AgentEnterpriseRelationshipsRecord,
   type AgentEnterpriseRelationshipsView,
+  type PauseReason,
+  type EnterpriseGraphLink,
+  type EnterpriseGraphNode,
+  type EnterpriseGraphOrgNode,
+  type EnterpriseGraphView,
+  type EnterpriseRelationshipTypeCustomDefinition,
   type ResolvedAgentEnterpriseRelationshipLink,
 } from "@paperclipai/shared";
 import { conflict, notFound, unprocessable } from "../errors.js";
@@ -287,6 +294,197 @@ export function agentService(db: Db) {
       ...row,
       spentMonthlyCents: spendByCompanyId.get(row.companyId)?.get(row.id) ?? 0,
     }));
+  }
+
+  type AgentOrgRow = ReturnType<typeof normalizeAgentRow> & {
+    companyName: string | null;
+  };
+
+  interface OrgScope {
+    rows: AgentOrgRow[];
+    byId: Map<string, AgentOrgRow>;
+    childrenByManager: Map<string, AgentOrgRow[]>;
+    includedIds: Set<string>;
+  }
+
+  async function buildVisibleOrgRows(visibleCompanyIds: string[] | null = null): Promise<AgentOrgRow[]> {
+    const rows = await (async () => {
+      if (visibleCompanyIds && visibleCompanyIds.length === 0) return [];
+      const conditions = [ne(agents.status, "terminated")];
+      if (visibleCompanyIds) {
+        conditions.push(inArray(agents.companyId, visibleCompanyIds));
+      }
+      return db.select().from(agents).where(and(...conditions));
+    })();
+    const hydratedRows = await hydrateAgentSpend(rows);
+    return attachCompanyNames(hydratedRows.map(normalizeAgentRow));
+  }
+
+  function collectOrgScope(companyId: string, normalizedRows: AgentOrgRow[]): OrgScope {
+    const byId = new Map(normalizedRows.map((row) => [row.id, row]));
+    const childrenByManager = new Map<string, AgentOrgRow[]>();
+
+    for (const row of normalizedRows) {
+      if (!row.reportsTo || !byId.has(row.reportsTo)) continue;
+      const children = childrenByManager.get(row.reportsTo) ?? [];
+      children.push(row);
+      childrenByManager.set(row.reportsTo, children);
+    }
+
+    const seedIds = normalizedRows
+      .filter((row) => row.companyId === companyId)
+      .map((row) => row.id);
+    const includedIds = new Set<string>();
+
+    for (const seedId of seedIds) {
+      let cursorId: string | null = seedId;
+      while (cursorId) {
+        const current = byId.get(cursorId);
+        if (!current) break;
+        if (includedIds.has(current.id)) {
+          cursorId = current.reportsTo ?? null;
+          continue;
+        }
+        includedIds.add(current.id);
+        cursorId = current.reportsTo ?? null;
+      }
+    }
+
+    const queue = [...seedIds];
+    while (queue.length > 0) {
+      const currentId = queue.shift();
+      if (!currentId) continue;
+      includedIds.add(currentId);
+      for (const child of childrenByManager.get(currentId) ?? []) {
+        if (includedIds.has(child.id)) continue;
+        includedIds.add(child.id);
+        queue.push(child.id);
+      }
+    }
+
+    return {
+      rows: normalizedRows.filter((row) => includedIds.has(row.id)),
+      byId,
+      childrenByManager,
+      includedIds,
+    };
+  }
+
+  function sortOrgRows(left: AgentOrgRow, right: AgentOrgRow) {
+    const companyOrder = (left.companyName ?? "").localeCompare(right.companyName ?? "");
+    if (companyOrder !== 0) return companyOrder;
+    return left.name.localeCompare(right.name);
+  }
+
+  function buildOrgTree(companyId: string, scope: OrgScope): EnterpriseGraphOrgNode[] {
+    const { rows, byId, childrenByManager, includedIds } = scope;
+    const build = (memberId: string): EnterpriseGraphOrgNode => {
+      const member = byId.get(memberId);
+      if (!member) {
+        throw notFound("Agent not found while building org chart");
+      }
+      const children = (childrenByManager.get(memberId) ?? [])
+        .filter((child) => includedIds.has(child.id))
+        .sort(sortOrgRows)
+        .map((child) => build(child.id));
+
+      return {
+        id: member.id,
+        name: member.name,
+        role: member.role,
+        status: member.status,
+        companyId: member.companyId,
+        companyName: member.companyName,
+        externalToCompany: member.companyId !== companyId,
+        reports: children,
+      };
+    };
+
+    return rows
+      .filter((row) => !row.reportsTo || !includedIds.has(row.reportsTo))
+      .sort(sortOrgRows)
+      .map((row) => build(row.id));
+  }
+
+  async function enterpriseGraphForCompany(
+    companyId: string,
+    visibleCompanyIds: string[] | null = null,
+  ): Promise<EnterpriseGraphView> {
+    const normalizedRows = await buildVisibleOrgRows(visibleCompanyIds);
+    const scope = collectOrgScope(companyId, normalizedRows);
+    const customTypes = new Map<string, EnterpriseRelationshipTypeCustomDefinition>();
+    const secondaryLinkCount = new Map<string, number>();
+
+    for (const row of scope.rows) {
+      const relationships = parseEnterpriseRelationshipsRecord(row.metadata);
+      for (const definition of relationships?.customTypes ?? []) {
+        customTypes.set(definition.key, definition);
+      }
+    }
+
+    const availableTypes = resolveEnterpriseRelationshipTypes(Array.from(customTypes.values()));
+    const typeByKey = new Map(availableTypes.map((definition) => [definition.key, definition]));
+    const links: EnterpriseGraphLink[] = [];
+
+    for (const row of scope.rows) {
+      const relationships = parseEnterpriseRelationshipsRecord(row.metadata);
+      for (const link of relationships?.links ?? []) {
+        const target = scope.byId.get(link.targetAgentId);
+        const definition = typeByKey.get(link.typeKey);
+        if (!target || !definition) continue;
+
+        links.push({
+          id: `${row.id}:${link.id}`,
+          sourceAgentId: row.id,
+          sourceAgentName: row.name,
+          sourceCompanyId: row.companyId,
+          sourceCompanyName: row.companyName,
+          targetAgentId: target.id,
+          targetAgentName: target.name,
+          targetCompanyId: target.companyId,
+          targetCompanyName: target.companyName,
+          typeKey: definition.key,
+          typeLabel: definition.label,
+          typeDescription: definition.description,
+          category: definition.category,
+          builtIn: definition.builtIn,
+          notes: link.notes ?? null,
+        });
+
+        secondaryLinkCount.set(row.id, (secondaryLinkCount.get(row.id) ?? 0) + 1);
+        secondaryLinkCount.set(target.id, (secondaryLinkCount.get(target.id) ?? 0) + 1);
+      }
+    }
+
+    const nodes: EnterpriseGraphNode[] = scope.rows
+      .slice()
+      .sort(sortOrgRows)
+      .map((row) => ({
+        ...row,
+        role: row.role as AgentRole,
+        status: row.status as AgentStatus,
+        pauseReason: row.pauseReason as PauseReason | null,
+        companyName: row.companyName,
+        externalToCompany: row.companyId !== companyId,
+        secondaryLinkCount: secondaryLinkCount.get(row.id) ?? 0,
+      }));
+
+    return {
+      companyId,
+      roots: buildOrgTree(companyId, scope),
+      nodes,
+      links: links.sort((left, right) => {
+        const categoryOrder = left.category.localeCompare(right.category);
+        if (categoryOrder !== 0) return categoryOrder;
+        const typeOrder = left.typeLabel.localeCompare(right.typeLabel);
+        if (typeOrder !== 0) return typeOrder;
+        const sourceOrder = left.sourceAgentName.localeCompare(right.sourceAgentName);
+        if (sourceOrder !== 0) return sourceOrder;
+        return left.targetAgentName.localeCompare(right.targetAgentName);
+      }),
+      availableTypes,
+      workflowPacks: [...BUILTIN_ENTERPRISE_WORKFLOW_PACKS],
+    };
   }
 
   async function getById(id: string) {
@@ -896,86 +1094,11 @@ export function agentService(db: Db) {
     },
 
     orgForCompany: async (companyId: string, visibleCompanyIds: string[] | null = null) => {
-      const rows = await (async () => {
-        if (visibleCompanyIds && visibleCompanyIds.length === 0) return [];
-        const conditions = [ne(agents.status, "terminated")];
-        if (visibleCompanyIds) {
-          conditions.push(inArray(agents.companyId, visibleCompanyIds));
-        }
-        return db.select().from(agents).where(and(...conditions));
-      })();
-      const hydratedRows = await hydrateAgentSpend(rows);
-      const normalizedRows = await attachCompanyNames(hydratedRows.map(normalizeAgentRow));
-      const byId = new Map(normalizedRows.map((row) => [row.id, row]));
-      const childrenByManager = new Map<string, Array<(typeof normalizedRows)[number]>>();
-
-      for (const row of normalizedRows) {
-        if (!row.reportsTo || !byId.has(row.reportsTo)) continue;
-        const children = childrenByManager.get(row.reportsTo) ?? [];
-        children.push(row);
-        childrenByManager.set(row.reportsTo, children);
-      }
-
-      const seedIds = normalizedRows
-        .filter((row) => row.companyId === companyId)
-        .map((row) => row.id);
-      if (seedIds.length === 0) return [];
-
-      const includedIds = new Set<string>();
-
-      for (const seedId of seedIds) {
-        let cursorId: string | null = seedId;
-        while (cursorId) {
-          const current = byId.get(cursorId);
-          if (!current) break;
-          if (includedIds.has(current.id)) {
-            cursorId = current.reportsTo ?? null;
-            continue;
-          }
-          includedIds.add(current.id);
-          cursorId = current.reportsTo ?? null;
-        }
-      }
-
-      const queue = [...seedIds];
-      while (queue.length > 0) {
-        const currentId = queue.shift();
-        if (!currentId) continue;
-        includedIds.add(currentId);
-        for (const child of childrenByManager.get(currentId) ?? []) {
-          if (includedIds.has(child.id)) continue;
-          includedIds.add(child.id);
-          queue.push(child.id);
-        }
-      }
-
-      const includedRows = normalizedRows.filter((row) => includedIds.has(row.id));
-      const sortRows = (left: (typeof includedRows)[number], right: (typeof includedRows)[number]) =>
-        left.name.localeCompare(right.name);
-
-      const build = (memberId: string): Record<string, unknown> => {
-        const member = byId.get(memberId);
-        if (!member) {
-          throw notFound("Agent not found while building org chart");
-        }
-        const children = (childrenByManager.get(memberId) ?? [])
-          .filter((child) => includedIds.has(child.id))
-          .sort(sortRows)
-          .map((child) => build(child.id));
-
-        return {
-          ...member,
-          companyName: member.companyName,
-          externalToCompany: member.companyId !== companyId,
-          reports: children,
-        };
-      };
-
-      return includedRows
-        .filter((row) => !row.reportsTo || !includedIds.has(row.reportsTo))
-        .sort(sortRows)
-        .map((row) => build(row.id));
+      const normalizedRows = await buildVisibleOrgRows(visibleCompanyIds);
+      return buildOrgTree(companyId, collectOrgScope(companyId, normalizedRows));
     },
+
+    enterpriseGraphForCompany,
 
     getChainOfCommand: async (agentId: string) => {
       const chain: {

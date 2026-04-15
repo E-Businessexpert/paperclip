@@ -3,6 +3,8 @@ import type {
   AgentDetail,
   AgentEnterpriseRelationshipsRecord,
   AgentEnterpriseRelationshipsView,
+  EnterpriseGraphOrgNode,
+  EnterpriseGraphView,
   AgentInstructionsBundle,
   AgentInstructionsFileDetail,
   AgentSkillSnapshot,
@@ -50,16 +52,7 @@ export interface AgentDirectoryEntry extends Agent {
   companyName?: string | null;
 }
 
-export interface OrgNode {
-  id: string;
-  name: string;
-  role: string;
-  status: string;
-  companyId?: string;
-  companyName?: string | null;
-  externalToCompany?: boolean;
-  reports: OrgNode[];
-}
+export type OrgNode = EnterpriseGraphOrgNode;
 
 export interface AgentHireResponse {
   agent: Agent;
@@ -97,6 +90,8 @@ export const agentsApi = {
   list: (companyId: string) => api.get<Agent[]>(`/companies/${companyId}/agents`),
   listGlobal: () => api.get<AgentDirectoryEntry[]>("/instance/agents"),
   org: (companyId: string) => api.get<OrgNode[]>(`/companies/${companyId}/org`),
+  enterpriseGraph: (companyId: string) =>
+    api.get<EnterpriseGraphView>(`/companies/${companyId}/enterprise-graph`),
   listConfigurations: (companyId: string) =>
     api.get<Record<string, unknown>[]>(`/companies/${companyId}/agent-configurations`),
   get: async (id: string, companyId?: string) => {

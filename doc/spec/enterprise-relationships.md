@@ -44,6 +44,14 @@ Paperclip also ships with built-in template packs so users can start from reusab
 - `infrastructure_assets`
 - `data_compliance`
 
+Paperclip now also ships with built-in workflow packs so users can bootstrap
+complete operational lanes instead of wiring each relationship by hand:
+
+- `standard_shared_saas`
+- `dedicated_managed_instance`
+- `enterprise_custom`
+- `ecommerce_website_cpanel`
+
 ## Data model
 
 Secondary enterprise relationships are stored in `agent.metadata.enterpriseRelationships`.
@@ -141,6 +149,20 @@ Request shape:
 
 Passing `relationships: null` removes the relationship record.
 
+Paperclip also exposes a company-scoped enterprise graph view:
+
+```http
+GET /api/companies/:companyId/enterprise-graph
+```
+
+This response includes:
+
+- the formal hierarchy roots for the selected company scope
+- the resolved enterprise-graph nodes for all included agents
+- the resolved secondary relationship links in that scope
+- the available relationship types
+- the built-in workflow pack catalog
+
 ## Auditing
 
 Writes through the dedicated route:
@@ -169,12 +191,25 @@ The Agent Detail configuration page provides:
 
 This is intentionally separate from the primary `reportsTo` picker.
 
+The Org Chart page now provides two distinct modes:
+
+- `Hierarchy`
+  - formal `reportsTo` tree only
+- `Enterprise Graph`
+  - the same formal tree plus secondary enterprise-link overlays
+  - relationship-category filtering
+  - workflow-pack reference cards
+
+This lets users see both chain-of-command and bureaucracy/service
+relationships without collapsing the primary hierarchy.
+
 ## Product direction
 
-This release adds typed secondary relationships while preserving one primary manager. That supports:
+This release adds typed secondary relationships, workflow packs, and an
+enterprise graph overlay while preserving one primary manager. That supports:
 
 - clean org-chart trees
 - richer enterprise coordination
 - AI-aware relationship semantics
-- future enterprise graph views
-- future workflow routing based on relationship type metadata
+- reusable workflow routing packs
+- enterprise-graph visibility for shared-service and cross-company models

@@ -7,7 +7,10 @@ import {
 } from "../constants.js";
 import { agentAdapterTypeSchema } from "../adapter-type.js";
 import { envConfigSchema } from "./secret.js";
-import { BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES } from "../types/agent.js";
+import {
+  BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES,
+  ENTERPRISE_RELATIONSHIP_CATEGORIES,
+} from "../types/agent.js";
 
 export const agentPermissionsSchema = z.object({
   canCreateAgents: z.boolean().optional().default(false),
@@ -115,13 +118,7 @@ const builtinEnterpriseRelationshipKeys = new Set(
   BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES.map((definition) => definition.key),
 );
 
-export const enterpriseRelationshipCategorySchema = z.enum([
-  "matrix",
-  "decision",
-  "asset",
-  "governance",
-  "custom",
-]);
+export const enterpriseRelationshipCategorySchema = z.enum(ENTERPRISE_RELATIONSHIP_CATEGORIES);
 
 export const enterpriseRelationshipTypeCustomDefinitionSchema = z.object({
   key: enterpriseRelationshipKeySchema,
