@@ -184,7 +184,7 @@ function relationshipCurvePath(source: LayoutNode, target: LayoutNode, index: nu
 }
 
 export function OrgChart() {
-  const { selectedCompanyId } = useCompany();
+  const { selectedCompanyId, selectedCompany } = useCompany();
   const { setBreadcrumbs } = useBreadcrumbs();
   const navigate = useNavigate();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -198,6 +198,7 @@ export function OrgChart() {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [dragging, setDragging] = useState(false);
+  const chartAccent = selectedCompany?.brandColor ?? "#60a5fa";
 
   const { data: orgTree, isLoading: orgLoading } = useQuery({
     queryKey: queryKeys.org(selectedCompanyId!),
@@ -427,7 +428,7 @@ export function OrgChart() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="mb-2 flex shrink-0 flex-wrap items-center justify-between gap-2">
+      <div className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-2xl border border-border/70 bg-gradient-to-br from-card/95 via-card/90 to-muted/50 px-3 py-3 shadow-sm dark:border-white/10 dark:from-slate-950/90 dark:via-slate-950/85 dark:to-slate-900/80">
         <div className="flex flex-wrap items-center gap-2">
           <Link to="/company/import">
             <Button variant="outline" size="sm">
@@ -465,7 +466,7 @@ export function OrgChart() {
 
       {viewMode === "enterprise" && enterpriseGraph ? (
         <>
-          <div className="mb-2 flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-border bg-card/70 px-3 py-2">
+          <div className="mb-2 flex shrink-0 flex-wrap items-center gap-2 rounded-xl border border-border/70 bg-gradient-to-r from-card/90 via-card/80 to-muted/40 px-3 py-2 shadow-sm dark:border-white/10 dark:from-slate-950/85 dark:via-slate-950/75 dark:to-slate-900/65">
             <span className="text-xs font-medium text-foreground/80">Relationship filter</span>
             <Button
               size="sm"
@@ -493,7 +494,7 @@ export function OrgChart() {
             {enterpriseGraph.workflowPacks.map((pack: EnterpriseWorkflowPackDefinition) => (
               <div
                 key={pack.key}
-                className="rounded-lg border border-border bg-card/70 p-3"
+                className="rounded-xl border border-border/70 bg-gradient-to-br from-card/90 via-card/80 to-muted/35 p-3 shadow-sm dark:border-white/10 dark:from-slate-950/80 dark:via-slate-950/70 dark:to-slate-900/55"
               >
                 <div className="text-sm font-semibold text-foreground">{pack.label}</div>
                 <div className="mt-1 text-xs text-muted-foreground">{pack.description}</div>
@@ -515,7 +516,7 @@ export function OrgChart() {
 
       <div
         ref={containerRef}
-        className="relative min-h-0 flex-1 overflow-hidden rounded-lg border border-border bg-muted/20"
+        className="relative min-h-0 flex-1 overflow-hidden rounded-2xl border border-border/70 bg-gradient-to-br from-slate-100/70 via-background to-slate-200/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] dark:border-white/10 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900/90"
         style={{ cursor: dragging ? "grabbing" : "grab" }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -523,9 +524,23 @@ export function OrgChart() {
         onMouseLeave={handleMouseUp}
         onWheel={handleWheel}
       >
+        <div
+          className="pointer-events-none absolute inset-0 opacity-90"
+          style={{
+            backgroundImage: `radial-gradient(circle at top left, ${chartAccent}22, transparent 28%), radial-gradient(circle at bottom right, ${chartAccent}18, transparent 32%)`,
+          }}
+        />
+        <div
+          className="pointer-events-none absolute inset-0 opacity-[0.18] dark:opacity-[0.12]"
+          style={{
+            backgroundImage:
+              "linear-gradient(rgba(148,163,184,0.22) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,0.22) 1px, transparent 1px)",
+            backgroundSize: "28px 28px",
+          }}
+        />
         <div className="absolute right-3 top-3 z-10 flex flex-col gap-1">
           <button
-            className="flex h-7 w-7 items-center justify-center rounded border border-border bg-background text-sm transition-colors hover:bg-accent"
+            className="flex h-8 w-8 items-center justify-center rounded-xl border border-border/70 bg-background/90 text-sm shadow-sm backdrop-blur transition-colors hover:bg-accent dark:border-white/10 dark:bg-slate-950/80"
             onClick={() => {
               const nextZoom = Math.min(zoom * 1.2, 2);
               const container = containerRef.current;
@@ -545,7 +560,7 @@ export function OrgChart() {
             +
           </button>
           <button
-            className="flex h-7 w-7 items-center justify-center rounded border border-border bg-background text-sm transition-colors hover:bg-accent"
+            className="flex h-8 w-8 items-center justify-center rounded-xl border border-border/70 bg-background/90 text-sm shadow-sm backdrop-blur transition-colors hover:bg-accent dark:border-white/10 dark:bg-slate-950/80"
             onClick={() => {
               const nextZoom = Math.max(zoom * 0.8, 0.2);
               const container = containerRef.current;
@@ -565,7 +580,7 @@ export function OrgChart() {
             &minus;
           </button>
           <button
-            className="flex h-7 w-7 items-center justify-center rounded border border-border bg-background text-[10px] transition-colors hover:bg-accent"
+            className="flex h-8 w-8 items-center justify-center rounded-xl border border-border/70 bg-background/90 text-[10px] shadow-sm backdrop-blur transition-colors hover:bg-accent dark:border-white/10 dark:bg-slate-950/80"
             onClick={fitToScreen}
             aria-label="Fit chart to screen"
             title="Fit chart to screen"
@@ -575,7 +590,7 @@ export function OrgChart() {
         </div>
 
         {viewMode === "enterprise" ? (
-          <div className="absolute left-3 top-3 z-10 max-w-xs rounded-lg border border-border bg-background/95 p-3 shadow-sm backdrop-blur">
+          <div className="absolute left-3 top-3 z-10 max-w-xs rounded-2xl border border-border/70 bg-background/92 p-3 shadow-lg backdrop-blur dark:border-white/10 dark:bg-slate-950/82">
             <div className="text-sm font-semibold text-foreground">Enterprise overlay</div>
             <div className="mt-1 text-xs text-muted-foreground">
               Solid lines are formal reporting. Dashed lines are secondary enterprise links.
@@ -608,7 +623,7 @@ export function OrgChart() {
                   key={`${parent.id}-${child.id}`}
                   d={`M ${x1} ${y1} L ${x1} ${midY} L ${x2} ${midY} L ${x2} ${y2}`}
                   fill="none"
-                  stroke="var(--border)"
+                  stroke="rgba(148, 163, 184, 0.55)"
                   strokeWidth={1.5}
                 />
               );
@@ -622,7 +637,7 @@ export function OrgChart() {
                 stroke={relationshipCategoryStroke[edge.category]}
                 strokeDasharray="8 6"
                 strokeWidth={2}
-                opacity={0.9}
+                opacity={0.82}
               />
             ))}
           </g>
@@ -639,12 +654,13 @@ export function OrgChart() {
             const agent = mergedAgentMap.get(node.id);
             const graphNode = graphNodeMap.get(node.id);
             const dotColor = statusDotColor[node.status] ?? defaultDotColor;
+            const cardAccent = node.externalToCompany ? "#f59e0b" : chartAccent;
 
             return (
               <div
                 key={node.id}
                 data-org-card
-                className="absolute cursor-pointer select-none rounded-lg border border-border bg-card shadow-sm transition-[box-shadow,border-color] duration-150 hover:border-foreground/20 hover:shadow-md"
+                className="absolute cursor-pointer select-none overflow-hidden rounded-2xl border border-border/70 bg-gradient-to-br from-card/95 via-card to-muted/40 shadow-[0_18px_35px_-24px_rgba(15,23,42,0.55)] transition-[box-shadow,border-color,transform] duration-150 hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-[0_24px_50px_-28px_rgba(15,23,42,0.7)] dark:border-white/10 dark:from-slate-950/92 dark:via-slate-950/88 dark:to-slate-900/72"
                 style={{
                   left: node.x,
                   top: node.y,
@@ -653,9 +669,13 @@ export function OrgChart() {
                 }}
                 onClick={() => navigate(agent ? agentUrl(agent) : `/agents/${node.id}`)}
               >
+                <div
+                  className="absolute inset-x-0 top-0 h-1"
+                  style={{ background: `linear-gradient(90deg, ${cardAccent}, transparent)` }}
+                />
                 <div className="flex items-center gap-3 px-4 py-3">
                   <div className="relative shrink-0">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-background/80 ring-1 ring-border/60 dark:ring-white/10">
                       <AgentIcon icon={agent?.icon} className="h-4.5 w-4.5 text-foreground/70" />
                     </div>
                     <span
@@ -672,7 +692,7 @@ export function OrgChart() {
                       {agent?.title ?? roleLabel(node.role)}
                     </div>
                     {node.externalToCompany ? (
-                      <div className="mt-1 text-[10px] leading-tight text-muted-foreground/80">
+                      <div className="mt-1 inline-flex max-w-full rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[10px] leading-tight text-amber-700 dark:text-amber-300">
                         {node.companyName ?? agent?.companyName ?? "External company"}
                       </div>
                     ) : null}

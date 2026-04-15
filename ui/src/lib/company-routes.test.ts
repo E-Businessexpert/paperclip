@@ -28,6 +28,16 @@ describe("company routes", () => {
     );
   });
 
+  it("treats chatrooms as a company-aware board route", () => {
+    expect(isBoardPathWithoutPrefix("/chatrooms")).toBe(true);
+    expect(extractCompanyPrefixFromPath("/chatrooms")).toBeNull();
+    expect(applyCompanyPrefix("/chatrooms", "PAP")).toBe("/PAP/chatrooms");
+  });
+
+  it("normalizes prefixed chatroom paths without duplicating the company prefix", () => {
+    expect(toCompanyRelativePath("/PAP/chatrooms")).toBe("/chatrooms");
+  });
+
   /**
    * Regression tests for https://github.com/paperclipai/paperclip/issues/2910
    *
