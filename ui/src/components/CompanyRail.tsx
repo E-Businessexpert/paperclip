@@ -168,7 +168,8 @@ export function CompanyRail() {
   const companyIds = useMemo(() => sidebarCompanies.map((company) => company.id), [sidebarCompanies]);
   const enterpriseRootCompany = useMemo(
     () =>
-      sidebarCompanies.find((company) => /cornerstone/i.test(company.name))
+      sidebarCompanies.find((company) => /family trust/i.test(company.name))
+      ?? sidebarCompanies.find((company) => /cornerstone/i.test(company.name))
       ?? selectedCompany
       ?? sidebarCompanies[0]
       ?? null,

@@ -21,18 +21,34 @@ export function FullStructurePage() {
     return companies.find((company) => company.issuePrefix.toUpperCase() === normalized) ?? null;
   }, [companies, companyPrefix]);
 
+  const enterpriseRootCompany = useMemo(
+    () =>
+      companies.find((company) => /family trust/i.test(company.name))
+      ?? companies.find((company) => /cornerstone/i.test(company.name))
+      ?? matchedCompany
+      ?? companies[0]
+      ?? null,
+    [companies, matchedCompany],
+  );
+
   useEffect(() => {
-    if (loading || !matchedCompany) return;
+    if (loading || !enterpriseRootCompany) return;
     if (
       shouldSyncCompanySelectionFromRoute({
         selectionSource,
         selectedCompanyId,
-        routeCompanyId: matchedCompany.id,
+        routeCompanyId: enterpriseRootCompany.id,
       })
     ) {
-      setSelectedCompanyId(matchedCompany.id, { source: "route_sync" });
+      setSelectedCompanyId(enterpriseRootCompany.id, { source: "route_sync" });
     }
-  }, [loading, matchedCompany, selectedCompanyId, selectionSource, setSelectedCompanyId]);
+  }, [
+    enterpriseRootCompany,
+    loading,
+    selectedCompanyId,
+    selectionSource,
+    setSelectedCompanyId,
+  ]);
 
   const backTo =
     typeof (location.state as { backTo?: string } | null)?.backTo === "string"
@@ -48,8 +64,8 @@ export function FullStructurePage() {
         backHref={backTo}
         title="Full Structure"
         subtitle={
-          matchedCompany
-            ? `Hierarchy view rooted in ${matchedCompany.name}. Use the node toggles to collapse subdivisions.`
+          enterpriseRootCompany
+            ? `Hierarchy view rooted in ${enterpriseRootCompany.name}. Use the node toggles to collapse subdivisions.`
             : "Hierarchy view with individually collapsible subdivisions."
         }
       />
