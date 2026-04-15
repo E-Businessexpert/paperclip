@@ -3,6 +3,7 @@ import {
   CircleDot,
   Target,
   LayoutDashboard,
+  MessageSquare,
   DollarSign,
   History,
   Search,
@@ -88,6 +89,7 @@ export function Sidebar() {
             badgeTone={inboxBadge.failedRuns > 0 ? "danger" : "default"}
             alert={inboxBadge.failedRuns > 0}
           />
+          <SidebarNavItem to="/chatrooms" label="AgentChatTR" icon={MessageSquare} />
           <PluginSlotOutlet
             slotTypes={["sidebar"]}
             context={pluginContext}
