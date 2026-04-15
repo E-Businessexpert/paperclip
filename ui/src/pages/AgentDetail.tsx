@@ -230,10 +230,18 @@ function scrollToContainerBottom(container: ScrollContainer, behavior: ScrollBeh
   container.scrollTo({ top: container.scrollHeight, behavior });
 }
 
-type AgentDetailView = "dashboard" | "instructions" | "configuration" | "skills" | "runs" | "budget";
+type AgentDetailView =
+  | "dashboard"
+  | "instructions"
+  | "skills"
+  | "permissions"
+  | "configuration"
+  | "runs"
+  | "budget";
 
 function parseAgentDetailView(value: string | null): AgentDetailView {
   if (value === "instructions" || value === "prompts") return "instructions";
+  if (value === "permissions" || value === "agent-permissions") return "permissions";
   if (value === "configure" || value === "configuration") return "configuration";
   if (value === "skills") return "skills";
   if (value === "budget") return "budget";
@@ -637,7 +645,7 @@ export function AgentDetail() {
   const activeView = urlRunId ? "runs" as AgentDetailView : parseAgentDetailView(urlTab ?? null);
   const needsDashboardData = activeView === "dashboard";
   const needsRunData = activeView === "runs" || Boolean(urlRunId);
-  const needsVisibleAgentDirectory = needsDashboardData || activeView === "configuration";
+  const needsVisibleAgentDirectory = needsDashboardData || activeView === "permissions";
   const shouldLoadHeartbeats = needsDashboardData || needsRunData;
   const [configDirty, setConfigDirty] = useState(false);
   const [configSaving, setConfigSaving] = useState(false);
@@ -756,6 +764,8 @@ export function AgentDetail() {
     const canonicalTab =
       activeView === "instructions"
         ? "instructions"
+        : activeView === "permissions"
+          ? "permissions"
         : activeView === "configuration"
           ? "configuration"
           : activeView === "skills"
@@ -883,6 +893,8 @@ export function AgentDetail() {
         crumbs.push({ label: `Run ${urlRunId.slice(0, 8)}` });
       } else if (activeView === "instructions") {
         crumbs.push({ label: "Instructions" });
+      } else if (activeView === "permissions") {
+        crumbs.push({ label: "Agent Permissions" });
       } else if (activeView === "configuration") {
         crumbs.push({ label: "Configuration" });
       // } else if (activeView === "skills") { // TODO: bring back later
@@ -1028,6 +1040,7 @@ export function AgentDetail() {
               { value: "dashboard", label: "Dashboard" },
               { value: "instructions", label: "Instructions" },
               { value: "skills", label: "Skills" },
+              { value: "permissions", label: "Agent Permissions" },
               { value: "configuration", label: "Configuration" },
               { value: "runs", label: "Runs" },
               { value: "budget", label: "Budget" },
@@ -1124,17 +1137,24 @@ export function AgentDetail() {
         />
       )}
 
+      {activeView === "permissions" && (
+        <AgentPermissionsPage
+          agent={agent}
+          companyId={resolvedCompanyId ?? undefined}
+          visibleAgents={visibleAgents}
+          updatePermissions={updatePermissions}
+        />
+      )}
+
       {activeView === "configuration" && (
         <AgentConfigurePage
           agent={agent}
           agentId={agent.id}
           companyId={resolvedCompanyId ?? undefined}
-          visibleAgents={visibleAgents}
           onDirtyChange={setConfigDirty}
           onSaveActionChange={setSaveConfigAction}
           onCancelActionChange={setCancelConfigAction}
           onSavingChange={setConfigSaving}
-          updatePermissions={updatePermissions}
         />
       )}
 
@@ -1433,22 +1453,18 @@ function AgentConfigurePage({
   agent,
   agentId,
   companyId,
-  visibleAgents,
   onDirtyChange,
   onSaveActionChange,
   onCancelActionChange,
   onSavingChange,
-  updatePermissions,
 }: {
   agent: AgentDetailRecord;
   agentId: string;
   companyId?: string;
-  visibleAgents: AgentDirectoryEntry[];
   onDirtyChange: (dirty: boolean) => void;
   onSaveActionChange: (save: (() => void) | null) => void;
   onCancelActionChange: (cancel: (() => void) | null) => void;
   onSavingChange: (saving: boolean) => void;
-  updatePermissions: { mutate: (permissions: AgentPermissionUpdate) => void; isPending: boolean };
 }) {
   const queryClient = useQueryClient();
   const [revisionsOpen, setRevisionsOpen] = useState(false);
@@ -1473,15 +1489,14 @@ function AgentConfigurePage({
     <div className="max-w-3xl space-y-6">
       <ConfigurationTab
         agent={agent}
-        visibleAgents={visibleAgents}
         onDirtyChange={onDirtyChange}
         onSaveActionChange={onSaveActionChange}
         onCancelActionChange={onCancelActionChange}
         onSavingChange={onSavingChange}
-        updatePermissions={updatePermissions}
         companyId={companyId}
         hidePromptTemplate
         hideInstructionsFile
+        showEnterpriseControls={false}
       />
       <div>
         <h3 className="text-sm font-medium mb-3">API Keys</h3>
@@ -1595,6 +1610,35 @@ function enterpriseRelationshipsEqual(
   });
 }
 
+function AgentPermissionsPage({
+  agent,
+  companyId,
+  visibleAgents,
+  updatePermissions,
+}: {
+  agent: AgentDetailRecord;
+  companyId?: string;
+  visibleAgents: AgentDirectoryEntry[];
+  updatePermissions: { mutate: (permissions: AgentPermissionUpdate) => void; isPending: boolean };
+}) {
+  return (
+    <ConfigurationTab
+      agent={agent}
+      companyId={companyId}
+      visibleAgents={visibleAgents}
+      updatePermissions={updatePermissions}
+      onDirtyChange={() => {}}
+      onSaveActionChange={() => {}}
+      onCancelActionChange={() => {}}
+      onSavingChange={() => {}}
+      hidePromptTemplate
+      hideInstructionsFile
+      showConfigForm={false}
+      showEnterpriseControls
+    />
+  );
+}
+
 /* ---- Configuration Tab ---- */
 
 function ConfigurationTab({
@@ -1608,22 +1652,28 @@ function ConfigurationTab({
   updatePermissions,
   hidePromptTemplate,
   hideInstructionsFile,
+  showConfigForm = true,
+  showEnterpriseControls = true,
 }: {
   agent: AgentDetailRecord;
-  visibleAgents: AgentDirectoryEntry[];
+  visibleAgents?: AgentDirectoryEntry[];
   companyId?: string;
   onDirtyChange: (dirty: boolean) => void;
   onSaveActionChange: (save: (() => void) | null) => void;
   onCancelActionChange: (cancel: (() => void) | null) => void;
   onSavingChange: (saving: boolean) => void;
-  updatePermissions: { mutate: (permissions: AgentPermissionUpdate) => void; isPending: boolean };
+  updatePermissions?: { mutate: (permissions: AgentPermissionUpdate) => void; isPending: boolean };
   hidePromptTemplate?: boolean;
   hideInstructionsFile?: boolean;
+  showConfigForm?: boolean;
+  showEnterpriseControls?: boolean;
 }) {
   const queryClient = useQueryClient();
   const { pushToast } = useToast();
   const [awaitingRefreshAfterSave, setAwaitingRefreshAfterSave] = useState(false);
   const lastAgentRef = useRef(agent);
+  const directoryAgents = visibleAgents ?? [];
+  const permissionMutationPending = updatePermissions?.isPending ?? false;
 
   const { data: adapterModels } = useQuery({
     queryKey:
@@ -1666,21 +1716,49 @@ function ConfigurationTab({
     relationshipBaseline,
   );
   const [relationshipTargetSearch, setRelationshipTargetSearch] = useState("");
+  const [quickStartTypeKey, setQuickStartTypeKey] = useState(
+    BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES[0]?.key ?? "",
+  );
+  const [templateLibraryOpen, setTemplateLibraryOpen] = useState(false);
+  const [templatePacksOpen, setTemplatePacksOpen] = useState(false);
+  const [customTypesOpen, setCustomTypesOpen] = useState(
+    Boolean(relationshipBaseline.customTypes.length),
+  );
+  const quickStartSectionRef = useRef<HTMLDivElement | null>(null);
+  const accessSectionRef = useRef<HTMLDivElement | null>(null);
+  const linksSectionRef = useRef<HTMLDivElement | null>(null);
+  const templateLibrarySectionRef = useRef<HTMLDivElement | null>(null);
+  const templatePacksSectionRef = useRef<HTMLDivElement | null>(null);
+  const customTypesSectionRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setRelationshipDraft(relationshipBaseline);
   }, [relationshipBaseline]);
 
+  useEffect(() => {
+    setRelationshipTargetSearch("");
+    setQuickStartTypeKey(BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES[0]?.key ?? "");
+    setTemplateLibraryOpen(false);
+    setTemplatePacksOpen(false);
+    setCustomTypesOpen(Boolean(relationshipBaseline.customTypes.length));
+  }, [agent.id, relationshipBaseline.customTypes.length]);
+
+  useEffect(() => {
+    if (relationshipDraft.customTypes.length > 0) {
+      setCustomTypesOpen(true);
+    }
+  }, [relationshipDraft.customTypes.length]);
+
   const relationshipTargets = useMemo(
     () =>
-      [...visibleAgents]
+      [...directoryAgents]
         .filter((candidate) => candidate.id !== agent.id && candidate.status !== "terminated")
         .sort((left, right) => {
           const companyOrder = (left.companyName ?? "").localeCompare(right.companyName ?? "");
           if (companyOrder !== 0) return companyOrder;
           return left.name.localeCompare(right.name);
         }),
-    [agent.id, visibleAgents],
+    [agent.id, directoryAgents],
   );
   const filteredRelationshipTargets = useMemo(() => {
     const needle = relationshipTargetSearch.trim().toLowerCase();
@@ -1744,6 +1822,12 @@ function ConfigurationTab({
       })),
     [relationshipTypeByKey],
   );
+  useEffect(() => {
+    if (quickStartTypeKey && relationshipTypeByKey.has(quickStartTypeKey)) return;
+    setQuickStartTypeKey(
+      BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES[0]?.key ?? availableRelationshipTypes[0]?.key ?? "",
+    );
+  }, [availableRelationshipTypes, quickStartTypeKey, relationshipTypeByKey]);
   const builtinRelationshipTypeKeys = useMemo(
     () => new Set(BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES.map((definition) => definition.key)),
     [],
@@ -1786,6 +1870,10 @@ function ConfigurationTab({
 
     return null;
   }, [availableRelationshipTypes, builtinRelationshipTypeKeys, relationshipDraft.customTypes, relationshipDraft.links]);
+  const selectedQuickStartType =
+    (quickStartTypeKey ? relationshipTypeByKey.get(quickStartTypeKey) : null) ??
+    availableRelationshipTypes[0] ??
+    null;
 
   const updateEnterpriseRelationships = useMutation({
     mutationFn: (relationships: AgentEnterpriseRelationshipsRecord | null) =>
@@ -1868,6 +1956,7 @@ function ConfigurationTab({
     ...overrides,
   });
   const toggleSystemPermission = (key: SystemPermissionKey, value: boolean) => {
+    if (!updatePermissions) return;
     switch (key) {
       case "canDesignOrganizations":
         updatePermissions.mutate(buildPermissionUpdate({ canDesignOrganizations: value }));
@@ -1919,6 +2008,7 @@ function ConfigurationTab({
     },
   ];
   const addCustomRelationshipType = () => {
+    setCustomTypesOpen(true);
     setRelationshipDraft((current) => ({
       ...current,
       customTypes: [
@@ -2014,347 +2104,557 @@ function ConfigurationTab({
         };
     updateEnterpriseRelationships.mutate(payload);
   };
+  const jumpToSection = useCallback((
+    section: "quickStart" | "access" | "links" | "templates" | "packs" | "custom",
+  ) => {
+    if (section === "templates") setTemplateLibraryOpen(true);
+    if (section === "packs") setTemplatePacksOpen(true);
+    if (section === "custom") setCustomTypesOpen(true);
+
+    const targetRef =
+      section === "quickStart"
+        ? quickStartSectionRef
+        : section === "access"
+          ? accessSectionRef
+          : section === "links"
+            ? linksSectionRef
+            : section === "templates"
+              ? templateLibrarySectionRef
+              : section === "packs"
+                ? templatePacksSectionRef
+                : customTypesSectionRef;
+
+    window.setTimeout(() => {
+      targetRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
+  }, []);
+  const startWithTemplate = (typeKey?: string) => {
+    addRelationshipLink(typeKey);
+    jumpToSection("links");
+  };
 
   return (
     <div className="space-y-6">
-      <AgentConfigForm
-        mode="edit"
-        agent={agent}
-        onSave={(patch) => updateAgent.mutate(patch)}
-        isSaving={isConfigSaving}
-        adapterModels={adapterModels}
-        onDirtyChange={onDirtyChange}
-        onSaveActionChange={onSaveActionChange}
-        onCancelActionChange={onCancelActionChange}
-        hideInlineSave
-        hidePromptTemplate={hidePromptTemplate}
-        hideInstructionsFile={hideInstructionsFile}
-        sectionLayout="cards"
-      />
+      {showConfigForm ? (
+        <AgentConfigForm
+          mode="edit"
+          agent={agent}
+          onSave={(patch) => updateAgent.mutate(patch)}
+          isSaving={isConfigSaving}
+          adapterModels={adapterModels}
+          onDirtyChange={onDirtyChange}
+          onSaveActionChange={onSaveActionChange}
+          onCancelActionChange={onCancelActionChange}
+          hideInlineSave
+          hidePromptTemplate={hidePromptTemplate}
+          hideInstructionsFile={hideInstructionsFile}
+          sectionLayout="cards"
+        />
+      ) : null}
 
-      <div>
-        <h3 className="text-sm font-medium mb-3">Permissions</h3>
-        <div className="border border-border rounded-lg p-4 space-y-4">
-          <div className="flex items-center justify-between gap-4 text-sm">
+      {showConfigForm && !showEnterpriseControls ? (
+        <div className="rounded-xl border border-border bg-muted/20 p-4 text-sm">
+          <div className="font-medium">Configuration stays focused on runtime setup.</div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Agent access, relationship templates, template packs, custom relationship types, and
+            cross-company relationship links now live in the dedicated
+            {" "}
+            <span className="font-medium text-foreground">Agent Permissions</span>
+            {" "}
+            tab so users can start from guided templates instead of scrolling through one long form.
+          </p>
+        </div>
+      ) : null}
+
+      {showEnterpriseControls ? (
+        <>
+          <div
+            ref={quickStartSectionRef}
+            className="rounded-xl border border-border bg-card p-5 shadow-sm space-y-4"
+          >
             <div className="space-y-1">
-              <div>Can create new agents</div>
+              <div className="text-sm font-medium">Agent Permissions</div>
               <p className="text-xs text-muted-foreground">
-                Lets this agent create or hire agents, implicitly assign tasks, and auto-enables the system design permissions below.
+                Start with a built-in template, then refine access and advanced relationships only
+                where needed. This keeps enterprise setup discoverable instead of burying it inside
+                configuration.
               </p>
             </div>
-            <ToggleSwitch
-              checked={canCreateAgents}
-              onCheckedChange={() => {
-                const nextCanCreateAgents = !canCreateAgents;
-                updatePermissions.mutate(buildPermissionUpdate({
-                  canCreateAgents: nextCanCreateAgents,
-                  canAssignTasks: nextCanCreateAgents ? true : canAssignTasks,
-                  ...(nextCanCreateAgents ? {
-                    canDesignOrganizations: true,
-                    canManageRelationshipTypes: true,
-                    canManageServiceDiscovery: true,
-                    canManageDeploymentAssignments: true,
-                    canGenerateSystemTopology: true,
-                  } : {}),
-                }));
-              }}
-              disabled={updatePermissions.isPending}
-            />
-          </div>
-          <div className="flex items-center justify-between gap-4 text-sm">
-            <div className="space-y-1">
-              <div>Can assign tasks</div>
-              <p className="text-xs text-muted-foreground">
-                {taskAssignHint}
-              </p>
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+              <label className="space-y-1">
+                <span className="text-xs font-medium text-muted-foreground">Start from template</span>
+                <select
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={selectedQuickStartType?.key ?? ""}
+                  onChange={(event) => setQuickStartTypeKey(event.target.value)}
+                >
+                  {BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES.map((definition) => (
+                    <option key={definition.key} value={definition.key}>
+                      {definition.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => startWithTemplate(selectedQuickStartType?.key)}
+                  disabled={relationshipTargets.length === 0 || !selectedQuickStartType}
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add relationship
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => jumpToSection("packs")}>
+                  Template packs
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => jumpToSection("custom")}>
+                  Custom setup
+                </Button>
+              </div>
             </div>
-            <ToggleSwitch
-              checked={canAssignTasks}
-              onCheckedChange={() => updatePermissions.mutate(buildPermissionUpdate({ canAssignTasks: !canAssignTasks }))}
-              disabled={updatePermissions.isPending || taskAssignLocked}
-            />
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="ghost" onClick={() => jumpToSection("access")}>
+                Agent access
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => jumpToSection("links")}>
+                Relationship links
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => jumpToSection("templates")}>
+                Built-in templates
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => jumpToSection("packs")}>
+                Packs
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => jumpToSection("custom")}>
+                Advanced custom types
+              </Button>
+            </div>
+            {selectedQuickStartType ? (
+              <div className="rounded-lg border border-dashed border-border/80 bg-muted/30 p-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <div className="text-sm font-medium">{selectedQuickStartType.label}</div>
+                    <div className="text-[11px] font-mono text-muted-foreground">
+                      {selectedQuickStartType.key}
+                    </div>
+                  </div>
+                  <span className="rounded-full bg-background px-2 py-0.5 text-[11px] text-muted-foreground">
+                    {enterpriseRelationshipCategoryOptions.find(
+                      (option) => option.value === selectedQuickStartType.category,
+                    )?.label ?? selectedQuickStartType.category}
+                  </span>
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {selectedQuickStartType.description}
+                </p>
+                {selectedQuickStartType.aiSemantics ? (
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    AI semantics: {selectedQuickStartType.aiSemantics}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+            {relationshipTargets.length === 0 ? (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                No visible target agents are available yet. Open this view from a board scope that
+                includes the companies you want to link.
+              </div>
+            ) : null}
           </div>
-          {systemPermissionRows.map((permission) => (
-            <div key={permission.key} className="flex items-center justify-between gap-4 text-sm">
+
+          <div ref={accessSectionRef}>
+            <h3 className="mb-3 text-sm font-medium">Agent access</h3>
+            <div className="border border-border rounded-lg p-4 space-y-4">
+              <div className="rounded-lg border border-dashed border-border/80 bg-muted/30 p-3 text-xs text-muted-foreground">
+                Start with the broad access switches first. Creator-capable agents automatically
+                unlock the deeper system design controls below, so users do not have to guess which
+                low-level permissions to toggle one by one.
+              </div>
+              <div className="flex items-center justify-between gap-4 text-sm">
+                <div className="space-y-1">
+                  <div>Can create new agents</div>
+                  <p className="text-xs text-muted-foreground">
+                    Lets this agent create or hire agents, implicitly assign tasks, and auto-enables
+                    the system design permissions below.
+                  </p>
+                </div>
+                <ToggleSwitch
+                  checked={canCreateAgents}
+                  onCheckedChange={() => {
+                    const nextCanCreateAgents = !canCreateAgents;
+                    updatePermissions?.mutate(buildPermissionUpdate({
+                      canCreateAgents: nextCanCreateAgents,
+                      canAssignTasks: nextCanCreateAgents ? true : canAssignTasks,
+                      ...(nextCanCreateAgents ? {
+                        canDesignOrganizations: true,
+                        canManageRelationshipTypes: true,
+                        canManageServiceDiscovery: true,
+                        canManageDeploymentAssignments: true,
+                        canGenerateSystemTopology: true,
+                      } : {}),
+                    }));
+                  }}
+                  disabled={permissionMutationPending}
+                />
+              </div>
+              <div className="flex items-center justify-between gap-4 text-sm">
+                <div className="space-y-1">
+                  <div>Can assign tasks</div>
+                  <p className="text-xs text-muted-foreground">
+                    {taskAssignHint}
+                  </p>
+                </div>
+                <ToggleSwitch
+                  checked={canAssignTasks}
+                  onCheckedChange={() =>
+                    updatePermissions?.mutate(buildPermissionUpdate({ canAssignTasks: !canAssignTasks }))
+                  }
+                  disabled={permissionMutationPending || taskAssignLocked}
+                />
+              </div>
+              {systemPermissionRows.map((permission) => (
+                <div key={permission.key} className="flex items-center justify-between gap-4 text-sm">
+                  <div className="space-y-1">
+                    <div>{permission.label}</div>
+                    <p className="text-xs text-muted-foreground">
+                      {permission.description}
+                    </p>
+                  </div>
+                  <ToggleSwitch
+                    checked={permission.checked}
+                    onCheckedChange={() => toggleSystemPermission(permission.key, !permission.checked)}
+                    disabled={permissionMutationPending}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div ref={linksSectionRef}>
+            <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
               <div className="space-y-1">
-                <div>{permission.label}</div>
+                <h3 className="text-sm font-medium">Relationship workspace</h3>
                 <p className="text-xs text-muted-foreground">
-                  {permission.description}
+                  Keep one formal <span className="font-mono">reportsTo</span> chain, then layer
+                  typed enterprise links for approvals, dotted lines, shared services, asset
+                  allocation, licensing, and governance.
                 </p>
               </div>
-              <ToggleSwitch
-                checked={permission.checked}
-                onCheckedChange={() => toggleSystemPermission(permission.key, !permission.checked)}
-                disabled={updatePermissions.isPending}
-              />
+              <div className="flex items-center gap-2">
+                {relationshipsDirty ? (
+                  <span className="text-xs text-amber-600 dark:text-amber-400">Unsaved changes</span>
+                ) : null}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={resetRelationships}
+                  disabled={!relationshipsDirty || updateEnterpriseRelationships.isPending}
+                >
+                  Reset
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={saveRelationships}
+                  disabled={!relationshipsDirty || updateEnterpriseRelationships.isPending || Boolean(relationshipValidationError)}
+                >
+                  {updateEnterpriseRelationships.isPending ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Saving
+                    </>
+                  ) : (
+                    "Save relationships"
+                  )}
+                </Button>
+              </div>
             </div>
-          ))}
-        </div>
-      </div>
-
-      <div>
-        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-          <div className="space-y-1">
-            <h3 className="text-sm font-medium">Secondary Enterprise Relationships</h3>
-            <p className="text-xs text-muted-foreground">
-              Keep one formal <span className="font-mono">reportsTo</span> chain, then use typed secondary links for approvals, dotted lines, asset allocation, licenses, and governance.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            {relationshipsDirty ? (
-              <span className="text-xs text-amber-600 dark:text-amber-400">Unsaved changes</span>
-            ) : null}
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={resetRelationships}
-              disabled={!relationshipsDirty || updateEnterpriseRelationships.isPending}
-            >
-              Reset
-            </Button>
-            <Button
-              size="sm"
-              onClick={saveRelationships}
-              disabled={!relationshipsDirty || updateEnterpriseRelationships.isPending || Boolean(relationshipValidationError)}
-            >
-              {updateEnterpriseRelationships.isPending ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Saving
-                </>
-              ) : (
-                "Save relationships"
-              )}
-            </Button>
-          </div>
-        </div>
-        <div className="border border-border rounded-lg p-4 space-y-5">
-          <div className="rounded-md border border-dashed border-border/80 bg-muted/30 p-3 text-xs text-muted-foreground">
-            Start with the built-in relationship library and template packs below. Custom relationship types are an advanced fallback when the universal enterprise model still is not enough.
-          </div>
+            <div className="border border-border rounded-lg p-4 space-y-5">
+              <div className="rounded-md border border-dashed border-border/80 bg-muted/30 p-3 text-xs text-muted-foreground">
+                The smooth path is: choose a built-in template, review a template pack if needed,
+                then use custom relationship types only for edge cases that the universal model does
+                not already cover.
+              </div>
           {relationshipValidationError ? (
             <div className="rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-700 dark:text-red-300">
               {relationshipValidationError}
             </div>
           ) : null}
 
-          <div className="space-y-3">
-            <div>
-              <h4 className="text-sm font-medium">Built-in relationship templates</h4>
-              <p className="text-xs text-muted-foreground">
-                Pick a ready-made enterprise link instead of typing keys manually.
-              </p>
-            </div>
-            <div className="grid gap-3 xl:grid-cols-2">
-              {BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES.map((definition) => {
-                const categoryLabel =
-                  enterpriseRelationshipCategoryOptions.find(
-                    (option) => option.value === definition.category,
-                  )?.label ?? definition.category;
-                return (
-                  <div key={definition.key} className="space-y-2 rounded-lg border border-border p-3">
-                    <div className="flex flex-wrap items-start justify-between gap-2">
+              <div ref={templateLibrarySectionRef}>
+                <Collapsible open={templateLibraryOpen} onOpenChange={setTemplateLibraryOpen}>
+                  <div className="rounded-lg border border-border">
+                    <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left">
                       <div>
-                        <div className="text-sm font-medium">{definition.label}</div>
-                        <div className="text-[11px] font-mono text-muted-foreground">{definition.key}</div>
+                        <h4 className="text-sm font-medium">Built-in relationship templates</h4>
+                        <p className="text-xs text-muted-foreground">
+                          Pick a ready-made enterprise link instead of typing keys manually.
+                        </p>
                       </div>
-                      <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
-                        {categoryLabel}
-                      </span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">{definition.description}</p>
-                    {definition.aiSemantics ? (
-                      <p className="text-[11px] text-muted-foreground">
-                        AI semantics: {definition.aiSemantics}
-                      </p>
-                    ) : null}
-                    <div className="flex justify-end">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => addRelationshipLink(definition.key)}
-                        disabled={relationshipTargets.length === 0}
-                      >
-                        Add link
-                      </Button>
-                    </div>
+                      <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", templateLibraryOpen && "rotate-180")} />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="border-t border-border px-4 py-4">
+                      <div className="grid gap-3 xl:grid-cols-2">
+                        {BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES.map((definition) => {
+                          const categoryLabel =
+                            enterpriseRelationshipCategoryOptions.find(
+                              (option) => option.value === definition.category,
+                            )?.label ?? definition.category;
+                          return (
+                            <div key={definition.key} className="space-y-2 rounded-lg border border-border p-3">
+                              <div className="flex flex-wrap items-start justify-between gap-2">
+                                <div>
+                                  <div className="text-sm font-medium">{definition.label}</div>
+                                  <div className="text-[11px] font-mono text-muted-foreground">{definition.key}</div>
+                                </div>
+                                <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+                                  {categoryLabel}
+                                </span>
+                              </div>
+                              <p className="text-xs text-muted-foreground">{definition.description}</p>
+                              {definition.aiSemantics ? (
+                                <p className="text-[11px] text-muted-foreground">
+                                  AI semantics: {definition.aiSemantics}
+                                </p>
+                              ) : null}
+                              <div className="flex justify-end">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => startWithTemplate(definition.key)}
+                                  disabled={relationshipTargets.length === 0}
+                                >
+                                  Add link
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </CollapsibleContent>
                   </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="space-y-3 border-t border-border pt-4">
-            <div>
-              <h4 className="text-sm font-medium">Relationship template packs</h4>
-              <p className="text-xs text-muted-foreground">
-                Use these grouped templates as enterprise presets for management, shared services, infrastructure, and compliance models.
-              </p>
-            </div>
-            <div className="grid gap-3 lg:grid-cols-2">
-              {relationshipTemplatePacks.map((pack) => (
-                <div key={pack.key} className="space-y-2 rounded-lg border border-border p-3">
-                  <div>
-                    <div className="text-sm font-medium">{pack.label}</div>
-                    <div className="text-[11px] font-mono text-muted-foreground">{pack.key}</div>
-                  </div>
-                  <p className="text-xs text-muted-foreground">{pack.description}</p>
-                  <div className="flex flex-wrap gap-2">
-                    {pack.definitions.map((definition) => (
-                      <Button
-                        key={`${pack.key}-${definition.key}`}
-                        size="sm"
-                        variant="outline"
-                        onClick={() => addRelationshipLink(definition.key)}
-                        disabled={relationshipTargets.length === 0}
-                      >
-                        {definition.label}
-                      </Button>
-                    ))}
-                  </div>
-                  {pack.aiSemantics ? (
-                    <p className="text-[11px] text-muted-foreground">
-                      AI semantics: {pack.aiSemantics}
-                    </p>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-3 border-t border-border pt-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h4 className="text-sm font-medium">Custom relationship types (advanced)</h4>
-                <p className="text-xs text-muted-foreground">
-                  Only add a custom relationship type when the built-in library and template packs are still not enough.
-                </p>
+                </Collapsible>
               </div>
-              <Button size="sm" variant="outline" onClick={addCustomRelationshipType}>
-                <Plus className="mr-2 h-4 w-4" />
-                Add type
-              </Button>
-            </div>
-            {relationshipDraft.customTypes.length === 0 ? (
-              <p className="text-xs text-muted-foreground">No custom relationship types yet.</p>
-            ) : (
-              relationshipDraft.customTypes.map((customType, index) => (
-                <div key={`custom-type-${index}`} className="space-y-3 rounded-lg border border-border p-3">
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-muted-foreground">Key</label>
-                      <Input
-                        value={customType.key}
-                        onChange={(event) =>
-                          updateCustomRelationshipType(index, { key: event.target.value })
-                        }
-                        placeholder="procuredThrough"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-muted-foreground">Label</label>
-                      <Input
-                        value={customType.label}
-                        onChange={(event) =>
-                          updateCustomRelationshipType(index, { label: event.target.value })
-                        }
-                        placeholder="Procured through"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-muted-foreground">Category</label>
-                      <select
-                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                        value={customType.category}
-                        onChange={(event) =>
-                          updateCustomRelationshipType(index, {
-                            category: event.target.value as EnterpriseRelationshipCategory,
-                          })
-                        }
-                      >
-                        {enterpriseRelationshipCategoryOptions.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
+
+              <div ref={templatePacksSectionRef}>
+                <Collapsible open={templatePacksOpen} onOpenChange={setTemplatePacksOpen}>
+                  <div className="rounded-lg border border-border">
+                    <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left">
+                      <div>
+                        <h4 className="text-sm font-medium">Relationship template packs</h4>
+                        <p className="text-xs text-muted-foreground">
+                          Use grouped presets for management, shared services, infrastructure, and compliance models.
+                        </p>
+                      </div>
+                      <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", templatePacksOpen && "rotate-180")} />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="border-t border-border px-4 py-4">
+                      <div className="grid gap-3 lg:grid-cols-2">
+                        {relationshipTemplatePacks.map((pack) => (
+                          <div key={pack.key} className="space-y-2 rounded-lg border border-border p-3">
+                            <div>
+                              <div className="text-sm font-medium">{pack.label}</div>
+                              <div className="text-[11px] font-mono text-muted-foreground">{pack.key}</div>
+                            </div>
+                            <p className="text-xs text-muted-foreground">{pack.description}</p>
+                            <div className="flex flex-wrap gap-2">
+                              {pack.definitions.map((definition) => (
+                                <Button
+                                  key={`${pack.key}-${definition.key}`}
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => startWithTemplate(definition.key)}
+                                  disabled={relationshipTargets.length === 0}
+                                >
+                                  {definition.label}
+                                </Button>
+                              ))}
+                            </div>
+                            {pack.aiSemantics ? (
+                              <p className="text-[11px] text-muted-foreground">
+                                AI semantics: {pack.aiSemantics}
+                              </p>
+                            ) : null}
+                          </div>
                         ))}
-                      </select>
-                    </div>
+                      </div>
+                    </CollapsibleContent>
                   </div>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-muted-foreground">Description</label>
-                      <textarea
-                        className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                        value={customType.description}
-                        onChange={(event) =>
-                          updateCustomRelationshipType(index, { description: event.target.value })
-                        }
-                        placeholder="Describe what this relationship means in the enterprise model."
-                      />
+                </Collapsible>
+              </div>
+
+              <div ref={customTypesSectionRef}>
+                <Collapsible open={customTypesOpen} onOpenChange={setCustomTypesOpen}>
+                  <div className="rounded-lg border border-border">
+                    <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
+                      <CollapsibleTrigger className="flex min-w-0 flex-1 items-start justify-between gap-3 text-left">
+                        <div>
+                          <h4 className="text-sm font-medium">Custom relationship types (advanced)</h4>
+                          <p className="text-xs text-muted-foreground">
+                            Use custom types only when the built-in library and template packs still
+                            do not match the business model.
+                          </p>
+                        </div>
+                        <ChevronDown className={cn("mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform", customTypesOpen && "rotate-180")} />
+                      </CollapsibleTrigger>
+                      <Button size="sm" variant="outline" onClick={addCustomRelationshipType}>
+                        <Plus className="mr-2 h-4 w-4" />
+                        Add type
+                      </Button>
                     </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-muted-foreground">AI semantics</label>
-                      <textarea
-                        className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                        value={customType.aiSemantics ?? ""}
-                        onChange={(event) =>
-                          updateCustomRelationshipType(index, {
-                            aiSemantics: event.target.value.trim().length > 0 ? event.target.value : null,
-                          })
-                        }
-                        placeholder="Tell the AI how to interpret and use this relationship."
-                      />
-                    </div>
+                    <CollapsibleContent className="border-t border-border px-4 py-4">
+                      {relationshipDraft.customTypes.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">No custom relationship types yet.</p>
+                      ) : (
+                        relationshipDraft.customTypes.map((customType, index) => (
+                          <div key={`custom-type-${index}`} className="space-y-3 rounded-lg border border-border p-3">
+                            <div className="grid gap-3 md:grid-cols-3">
+                              <div className="space-y-1">
+                                <label className="text-xs font-medium text-muted-foreground">Key</label>
+                                <Input
+                                  value={customType.key}
+                                  onChange={(event) =>
+                                    updateCustomRelationshipType(index, { key: event.target.value })
+                                  }
+                                  placeholder="procuredThrough"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-xs font-medium text-muted-foreground">Label</label>
+                                <Input
+                                  value={customType.label}
+                                  onChange={(event) =>
+                                    updateCustomRelationshipType(index, { label: event.target.value })
+                                  }
+                                  placeholder="Procured through"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-xs font-medium text-muted-foreground">Category</label>
+                                <select
+                                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                  value={customType.category}
+                                  onChange={(event) =>
+                                    updateCustomRelationshipType(index, {
+                                      category: event.target.value as EnterpriseRelationshipCategory,
+                                    })
+                                  }
+                                >
+                                  {enterpriseRelationshipCategoryOptions.map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                      {option.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+                            <div className="grid gap-3 md:grid-cols-2">
+                              <div className="space-y-1">
+                                <label className="text-xs font-medium text-muted-foreground">Description</label>
+                                <textarea
+                                  className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                  value={customType.description}
+                                  onChange={(event) =>
+                                    updateCustomRelationshipType(index, { description: event.target.value })
+                                  }
+                                  placeholder="Describe what this relationship means in the enterprise model."
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-xs font-medium text-muted-foreground">AI semantics</label>
+                                <textarea
+                                  className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                  value={customType.aiSemantics ?? ""}
+                                  onChange={(event) =>
+                                    updateCustomRelationshipType(index, {
+                                      aiSemantics: event.target.value.trim().length > 0 ? event.target.value : null,
+                                    })
+                                  }
+                                  placeholder="Tell the AI how to interpret and use this relationship."
+                                />
+                              </div>
+                            </div>
+                            <div className="flex justify-end">
+                              <Button size="sm" variant="ghost" onClick={() => removeCustomRelationshipType(index)}>
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                Remove type
+                              </Button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </CollapsibleContent>
                   </div>
-                  <div className="flex justify-end">
-                    <Button size="sm" variant="ghost" onClick={() => removeCustomRelationshipType(index)}>
-                      <Trash2 className="mr-2 h-4 w-4" />
-                      Remove type
+                </Collapsible>
+              </div>
+
+              <div className="space-y-3 border-t border-border pt-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h4 className="text-sm font-medium">Relationship links</h4>
+                    <p className="text-xs text-muted-foreground">
+                      Connect this agent to other agents with typed secondary enterprise links.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="ghost" onClick={() => jumpToSection("templates")}>
+                      Browse templates
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => jumpToSection("packs")}>
+                      Browse packs
                     </Button>
                   </div>
                 </div>
-              ))
-            )}
-          </div>
-
-          <div className="space-y-3 border-t border-border pt-4">
-            <div>
-              <h4 className="text-sm font-medium">Relationship links</h4>
-              <p className="text-xs text-muted-foreground">
-                Connect this agent to other agents with typed secondary enterprise links.
-              </p>
-            </div>
-            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Search target agents</label>
-                <Input
-                  value={relationshipTargetSearch}
-                  onChange={(event) => setRelationshipTargetSearch(event.target.value)}
-                  placeholder="Search by agent, company, role, or title"
-                />
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => addRelationshipLink()}
-                disabled={relationshipTargets.length === 0}
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Add relationship
-              </Button>
-            </div>
-            {relationshipTargets.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
-                No eligible target agents are visible in this board scope yet. The editor needs directory visibility across the companies you want to link.
-              </p>
-            ) : filteredRelationshipTargets.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
-                No target agents match the current search. Clear the filter or broaden the board scope.
-              </p>
-            ) : null}
-            {relationshipDraft.links.length === 0 ? (
-              <p className="text-xs text-muted-foreground">No secondary enterprise relationships yet.</p>
-            ) : (
+                <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground">Search target agents</label>
+                    <Input
+                      value={relationshipTargetSearch}
+                      onChange={(event) => setRelationshipTargetSearch(event.target.value)}
+                      placeholder="Search by agent, company, role, or title"
+                    />
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => addRelationshipLink(selectedQuickStartType?.key)}
+                    disabled={relationshipTargets.length === 0}
+                  >
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add relationship
+                  </Button>
+                </div>
+                {relationshipTargets.length === 0 ? (
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-3 text-xs text-amber-700 dark:text-amber-300">
+                    No eligible target agents are visible in this board scope yet. Open this view
+                    from a broader company scope before creating cross-company links.
+                  </div>
+                ) : filteredRelationshipTargets.length === 0 ? (
+                  <div className="rounded-lg border border-border bg-muted/30 px-3 py-3 text-xs text-muted-foreground">
+                    No target agents match the current search. Clear the filter or broaden the board
+                    scope.
+                  </div>
+                ) : null}
+                {relationshipDraft.links.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-border/80 bg-muted/20 p-4 text-sm">
+                    <div className="font-medium">No relationship links yet.</div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Start from a built-in template or template pack to avoid hand-building links
+                      from scratch.
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => startWithTemplate(selectedQuickStartType?.key)}
+                        disabled={relationshipTargets.length === 0 || !selectedQuickStartType}
+                      >
+                        Use selected template
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => jumpToSection("packs")}>
+                        Open template packs
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
               relationshipDraft.links.map((link) => {
                 const selectedType = relationshipTypeByKey.get(link.typeKey);
                 const selectedTarget = relationshipTargetById.get(link.targetAgentId);
@@ -2446,10 +2746,12 @@ function ConfigurationTab({
                   </div>
                 );
               })
-            )}
+                )}
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
+        </>
+      ) : null}
     </div>
   );
 }
