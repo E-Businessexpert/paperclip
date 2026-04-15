@@ -287,6 +287,36 @@ function buildChildCountMap(roots: OrgNode[]): Map<string, number> {
   return counts;
 }
 
+function countDirectAndIndirectReports(node: OrgNode): number {
+  return node.reports.reduce(
+    (total, child) => total + 1 + countDirectAndIndirectReports(child),
+    0,
+  );
+}
+
+function sortRootsForPresentation(roots: OrgNode[]): OrgNode[] {
+  return [...roots].sort((left, right) => {
+    const reportDelta = countDirectAndIndirectReports(right) - countDirectAndIndirectReports(left);
+    if (reportDelta !== 0) return reportDelta;
+    return left.name.localeCompare(right.name);
+  });
+}
+
+function buildRootPreviewCollapsedNodeIds(roots: OrgNode[]): Set<string> {
+  const collapsed = new Set<string>();
+
+  const visit = (node: OrgNode, depth: number) => {
+    if (depth >= 1 && node.reports.length > 0) {
+      collapsed.add(node.id);
+    }
+
+    node.reports.forEach((child) => visit(child, depth + 1));
+  };
+
+  roots.forEach((root) => visit(root, 0));
+  return collapsed;
+}
+
 function applyCollapsedReports(node: OrgNode, collapsedNodeIds: ReadonlySet<string>): OrgNode {
   const reports = collapsedNodeIds.has(node.id)
     ? []
@@ -584,10 +614,6 @@ export function OrgChart({
   }, [selectedCompanyId, effectiveViewMode]);
 
   useEffect(() => {
-    setCollapsedNodeIds(new Set());
-  }, [selectedCompanyId, effectiveViewMode]);
-
-  useEffect(() => {
     if (!exportMenuOpen) return;
 
     const handlePointerDown = (event: PointerEvent) => {
@@ -622,11 +648,23 @@ export function OrgChart({
   }, [enterpriseGraph]);
 
   const rawRoots = useMemo(
-    () => (effectiveViewMode === "enterprise" ? enterpriseGraph?.roots ?? [] : orgTree ?? []),
+    () =>
+      sortRootsForPresentation(
+        effectiveViewMode === "enterprise" ? enterpriseGraph?.roots ?? [] : orgTree ?? [],
+      ),
     [effectiveViewMode, enterpriseGraph, orgTree],
   );
 
   const childCountMap = useMemo(() => buildChildCountMap(rawRoots), [rawRoots]);
+
+  useEffect(() => {
+    if (fullscreen && effectiveViewMode === "hierarchy") {
+      setCollapsedNodeIds(buildRootPreviewCollapsedNodeIds(rawRoots));
+      return;
+    }
+
+    setCollapsedNodeIds(new Set());
+  }, [effectiveViewMode, fullscreen, rawRoots, selectedCompanyId]);
 
   const activeRoots = useMemo(
     () => rawRoots.map((root) => applyCollapsedReports(root, collapsedNodeIds)),

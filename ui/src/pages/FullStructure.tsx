@@ -65,8 +65,8 @@ export function FullStructurePage() {
         title="Full Structure"
         subtitle={
           enterpriseRootCompany
-            ? `Hierarchy view rooted in ${enterpriseRootCompany.name}. Use the node toggles to collapse subdivisions.`
-            : "Hierarchy view with individually collapsible subdivisions."
+            ? `Hierarchy view rooted in ${enterpriseRootCompany.name}. Only the trust lane starts open; expand subdivisions as needed.`
+            : "Hierarchy view with only the top trust lane open at first."
         }
       />
     </div>
