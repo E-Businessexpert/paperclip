@@ -50,6 +50,7 @@ import { queryKeys } from "./lib/queryKeys";
 import { useCompany } from "./context/CompanyContext";
 import { useDialog } from "./context/DialogContext";
 import { loadLastInboxTab } from "./lib/inbox";
+import { normalizeCompanyPrefix } from "./lib/company-routes";
 import { shouldRedirectCompanylessRouteToOnboarding } from "./lib/onboarding-route";
 
 function BootstrapPendingPage({ hasActiveInvite = false }: { hasActiveInvite?: boolean }) {
@@ -291,6 +292,35 @@ function UnprefixedBoardRedirect() {
   );
 }
 
+function DuplicateCompanyPrefixRedirect() {
+  const location = useLocation();
+  const params = useParams();
+
+  const companyPrefix = params.companyPrefix
+    ? normalizeCompanyPrefix(params.companyPrefix)
+    : null;
+  const duplicatePrefix = params.duplicatePrefix
+    ? normalizeCompanyPrefix(params.duplicatePrefix)
+    : null;
+  const rest = params["*"] ?? "";
+
+  if (!companyPrefix || !duplicatePrefix || companyPrefix !== duplicatePrefix) {
+    return <NotFoundPage scope="board" />;
+  }
+
+  const pathname = rest ? `/${companyPrefix}/${rest}` : `/${companyPrefix}/dashboard`;
+  return (
+    <Navigate
+      to={{
+        pathname,
+        search: location.search,
+        hash: location.hash,
+      }}
+      replace
+    />
+  );
+}
+
 function NoCompaniesStartPage() {
   const { openOnboarding } = useDialog();
 
@@ -360,6 +390,7 @@ export function App() {
           <Route path="tests/ux/runs" element={<UnprefixedBoardRedirect />} />
           <Route path=":companyPrefix" element={<Layout />}>
             {boardRoutes()}
+            <Route path=":duplicatePrefix/*" element={<DuplicateCompanyPrefixRedirect />} />
           </Route>
           <Route path="*" element={<NotFoundPage scope="global" />} />
         </Route>
