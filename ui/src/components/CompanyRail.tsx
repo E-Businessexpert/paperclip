@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Paperclip, Plus } from "lucide-react";
+import { Network, Paperclip, Plus } from "lucide-react";
 import { useQueries } from "@tanstack/react-query";
 import {
   DndContext,
@@ -154,17 +154,26 @@ function SortableCompanyItem({
 }
 
 export function CompanyRail() {
-  const { companies, selectedCompanyId, setSelectedCompanyId } = useCompany();
+  const { companies, selectedCompany, selectedCompanyId, setSelectedCompanyId } = useCompany();
   const { openOnboarding } = useDialog();
   const navigate = useNavigate();
   const location = useLocation();
   const isInstanceRoute = location.pathname.startsWith("/instance/");
+  const isFullStructureRoute = location.pathname.includes("/full-structure");
   const highlightedCompanyId = isInstanceRoute ? null : selectedCompanyId;
   const sidebarCompanies = useMemo(
     () => companies.filter((company) => company.status !== "archived"),
     [companies],
   );
   const companyIds = useMemo(() => sidebarCompanies.map((company) => company.id), [sidebarCompanies]);
+  const enterpriseRootCompany = useMemo(
+    () =>
+      sidebarCompanies.find((company) => /cornerstone/i.test(company.name))
+      ?? selectedCompany
+      ?? sidebarCompanies[0]
+      ?? null,
+    [selectedCompany, sidebarCompanies],
+  );
 
   const liveRunsQueries = useQueries({
     queries: companyIds.map((companyId) => ({
@@ -267,11 +276,53 @@ export function CompanyRail() {
     [orderedCompanies]
   );
 
+  const openFullStructure = useCallback(() => {
+    if (!enterpriseRootCompany) return;
+    setSelectedCompanyId(enterpriseRootCompany.id, { source: "manual" });
+    navigate(`/${enterpriseRootCompany.issuePrefix}/full-structure`, {
+      state: {
+        backTo: `${location.pathname}${location.search}${location.hash}`,
+      },
+    });
+  }, [
+    enterpriseRootCompany,
+    location.hash,
+    location.pathname,
+    location.search,
+    navigate,
+    setSelectedCompanyId,
+  ]);
+
   return (
     <div className="flex flex-col items-center w-[72px] shrink-0 h-full bg-background border-r border-border">
       {/* Paperclip icon - aligned with top sections (implied line, no visible border) */}
       <div className="flex items-center justify-center h-12 w-full shrink-0">
         <Paperclip className="h-5 w-5 text-foreground" />
+      </div>
+
+      <div className="flex items-center justify-center pb-2 shrink-0">
+        <Tooltip delayDuration={300}>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={openFullStructure}
+              disabled={!enterpriseRootCompany}
+              className={cn(
+                "flex items-center justify-center w-11 h-11 border text-muted-foreground transition-[border-color,color,border-radius,background-color] duration-150",
+                "rounded-[22px] hover:rounded-[14px]",
+                "border-border/70 hover:border-foreground/30 hover:text-foreground",
+                "disabled:cursor-not-allowed disabled:opacity-50",
+                isFullStructureRoute && "rounded-[14px] border-foreground/30 bg-accent/40 text-foreground",
+              )}
+              aria-label="Open full structure"
+            >
+              <Network className="h-5 w-5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right" sideOffset={8}>
+            <p>Full structure</p>
+          </TooltipContent>
+        </Tooltip>
       </div>
 
       {/* Company list */}

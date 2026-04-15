@@ -39,6 +39,7 @@ import { PluginPage } from "./pages/PluginPage";
 import { IssueChatUxLab } from "./pages/IssueChatUxLab";
 import { RunTranscriptUxLab } from "./pages/RunTranscriptUxLab";
 import { OrgChart } from "./pages/OrgChart";
+import { FullStructurePage } from "./pages/FullStructure";
 import { AgentChatTR } from "./pages/AgentChatTR";
 import { NewAgent } from "./pages/NewAgent";
 import { AuthPage } from "./pages/Auth";
@@ -292,6 +293,26 @@ function UnprefixedBoardRedirect() {
   );
 }
 
+function FullStructureRedirect() {
+  const { companies, selectedCompany, loading } = useCompany();
+
+  if (loading) {
+    return <div className="mx-auto max-w-xl py-10 text-sm text-muted-foreground">Loading...</div>;
+  }
+
+  const targetCompany =
+    companies.find((company) => /cornerstone/i.test(company.name))
+    ?? selectedCompany
+    ?? companies[0]
+    ?? null;
+
+  if (!targetCompany) {
+    return <NoCompaniesStartPage />;
+  }
+
+  return <Navigate to={`/${targetCompany.issuePrefix}/full-structure`} replace />;
+}
+
 function DuplicateCompanyPrefixRedirect() {
   const location = useLocation();
   const params = useParams();
@@ -365,6 +386,7 @@ export function App() {
           <Route path="issues" element={<UnprefixedBoardRedirect />} />
           <Route path="issues/:issueId" element={<UnprefixedBoardRedirect />} />
           <Route path="chatrooms" element={<UnprefixedBoardRedirect />} />
+          <Route path="full-structure" element={<FullStructureRedirect />} />
           <Route path="routines" element={<UnprefixedBoardRedirect />} />
           <Route path="routines/:routineId" element={<UnprefixedBoardRedirect />} />
           <Route path="skills/*" element={<UnprefixedBoardRedirect />} />
@@ -388,6 +410,7 @@ export function App() {
           <Route path="execution-workspaces/:workspaceId/issues" element={<UnprefixedBoardRedirect />} />
           <Route path="tests/ux/chat" element={<UnprefixedBoardRedirect />} />
           <Route path="tests/ux/runs" element={<UnprefixedBoardRedirect />} />
+          <Route path=":companyPrefix/full-structure" element={<FullStructurePage />} />
           <Route path=":companyPrefix" element={<Layout />}>
             {boardRoutes()}
             <Route path=":duplicatePrefix/*" element={<DuplicateCompanyPrefixRedirect />} />

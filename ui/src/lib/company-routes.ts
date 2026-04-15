@@ -16,6 +16,7 @@ const BOARD_ROUTE_ROOTS = new Set([
   "activity",
   "inbox",
   "chatrooms",
+  "full-structure",
   "design-guide",
 ]);
 
