@@ -1792,6 +1792,10 @@ function ConfigurationTab({
     }
     return [...groups.entries()];
   }, [filteredRelationshipTargets]);
+  const liveRelationshipSearchResults = useMemo(() => {
+    if (!relationshipTargetSearch.trim()) return relationshipTargets.slice(0, 8);
+    return filteredRelationshipTargets.slice(0, 8);
+  }, [filteredRelationshipTargets, relationshipTargetSearch, relationshipTargets]);
   const availableRelationshipTypes = useMemo(
     () => resolveEnterpriseRelationshipTypes(relationshipDraft.customTypes),
     [relationshipDraft.customTypes],
@@ -1861,6 +1865,9 @@ function ConfigurationTab({
       if (!link.typeKey.trim()) return "Every enterprise relationship needs a type.";
       if (!validTypeKeys.has(link.typeKey)) return `Unknown relationship type '${link.typeKey}'.`;
       if (!link.targetAgentId.trim()) return "Every enterprise relationship needs a target agent.";
+      if (!relationshipTargetById.has(link.targetAgentId)) {
+        return "One or more relationship targets no longer exist in the visible agent directory. Pick a real agent from the live search results or dropdown.";
+      }
       const pairKey = `${link.typeKey}::${link.targetAgentId}`;
       if (seenPairs.has(pairKey)) {
         return "Duplicate enterprise relationship targets are not allowed for the same type.";
@@ -1869,7 +1876,7 @@ function ConfigurationTab({
     }
 
     return null;
-  }, [availableRelationshipTypes, builtinRelationshipTypeKeys, relationshipDraft.customTypes, relationshipDraft.links]);
+  }, [availableRelationshipTypes, builtinRelationshipTypeKeys, relationshipDraft.customTypes, relationshipDraft.links, relationshipTargetById]);
   const selectedQuickStartType =
     (quickStartTypeKey ? relationshipTypeByKey.get(quickStartTypeKey) : null) ??
     availableRelationshipTypes[0] ??
@@ -2048,12 +2055,18 @@ function ConfigurationTab({
       };
     });
   };
-  const addRelationshipLink = (preferredTypeKey?: string) => {
+  const addRelationshipLink = (preferredTypeKey?: string, preferredTargetAgentId?: string) => {
     const defaultType =
       preferredTypeKey && relationshipTypeByKey.has(preferredTypeKey)
         ? preferredTypeKey
         : availableRelationshipTypes[0]?.key ?? "dottedLineTo";
-    const defaultTarget = filteredRelationshipTargets[0]?.id ?? relationshipTargets[0]?.id ?? "";
+    const defaultTarget =
+      (preferredTargetAgentId && relationshipTargetById.has(preferredTargetAgentId)
+        ? preferredTargetAgentId
+        : null) ??
+      filteredRelationshipTargets[0]?.id ??
+      relationshipTargets[0]?.id ??
+      "";
     setRelationshipDraft((current) => ({
       ...current,
       links: [
@@ -2128,8 +2141,8 @@ function ConfigurationTab({
       targetRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 0);
   }, []);
-  const startWithTemplate = (typeKey?: string) => {
-    addRelationshipLink(typeKey);
+  const startWithTemplate = (typeKey?: string, targetAgentId?: string) => {
+    addRelationshipLink(typeKey, targetAgentId);
     jumpToSection("links");
   };
 
@@ -2623,6 +2636,49 @@ function ConfigurationTab({
                     Add relationship
                   </Button>
                 </div>
+                {relationshipTargets.length > 0 ? (
+                  <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <div className="text-xs font-medium text-foreground">Live search results</div>
+                        <p className="text-[11px] text-muted-foreground">
+                          Only real agents from the current board scope appear here.
+                        </p>
+                      </div>
+                      <span className="text-[11px] text-muted-foreground">
+                        Showing {liveRelationshipSearchResults.length} of {filteredRelationshipTargets.length}
+                      </span>
+                    </div>
+                    {liveRelationshipSearchResults.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">
+                        No live matches for the current search yet.
+                      </p>
+                    ) : (
+                      <div className="grid gap-2 lg:grid-cols-2">
+                        {liveRelationshipSearchResults.map((candidate) => (
+                          <button
+                            key={candidate.id}
+                            type="button"
+                            className="flex items-start justify-between gap-3 rounded-lg border border-border bg-background px-3 py-3 text-left transition-colors hover:bg-muted/50"
+                            onClick={() => startWithTemplate(selectedQuickStartType?.key, candidate.id)}
+                          >
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium">{candidate.name}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {candidate.companyName ? `${candidate.companyName} · ` : ""}
+                                {candidate.role}
+                                {candidate.title ? ` · ${candidate.title}` : ""}
+                              </div>
+                            </div>
+                            <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+                              Add
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
                 {relationshipTargets.length === 0 ? (
                   <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-3 text-xs text-amber-700 dark:text-amber-300">
                     No eligible target agents are visible in this board scope yet. Open this view
@@ -2696,6 +2752,11 @@ function ConfigurationTab({
                           }
                         >
                           <option value="">Select agent</option>
+                          {!selectedTarget && link.targetAgentId ? (
+                            <option value={link.targetAgentId}>
+                              Missing agent ({link.targetAgentId.slice(0, 8)})
+                            </option>
+                          ) : null}
                           {selectedTarget && !filteredRelationshipTargets.some((candidate) => candidate.id === selectedTarget.id) ? (
                             <optgroup label="Selected target">
                               <option value={selectedTarget.id}>
@@ -2720,6 +2781,11 @@ function ConfigurationTab({
                             {selectedTarget.companyName ? `${selectedTarget.companyName} · ` : ""}
                             {selectedTarget.role}
                             {selectedTarget.title ? ` · ${selectedTarget.title}` : ""}
+                          </p>
+                        ) : link.targetAgentId ? (
+                          <p className="text-xs text-red-600 dark:text-red-400">
+                            This target agent is no longer present in the live directory. Re-select
+                            an existing agent before saving.
                           </p>
                         ) : null}
                       </div>
