@@ -320,7 +320,13 @@ export function agentService(db: Db) {
     return attachCompanyNames(hydratedRows.map(normalizeAgentRow));
   }
 
-  function collectOrgScope(companyId: string, normalizedRows: AgentOrgRow[]): OrgScope {
+  type EnterpriseGraphScopeMode = "company" | "family";
+
+  function collectOrgScope(
+    companyId: string,
+    normalizedRows: AgentOrgRow[],
+    scopeMode: EnterpriseGraphScopeMode = "company",
+  ): OrgScope {
     const byId = new Map(normalizedRows.map((row) => [row.id, row]));
     const childrenByManager = new Map<string, AgentOrgRow[]>();
 
@@ -329,6 +335,16 @@ export function agentService(db: Db) {
       const children = childrenByManager.get(row.reportsTo) ?? [];
       children.push(row);
       childrenByManager.set(row.reportsTo, children);
+    }
+
+    if (scopeMode === "family") {
+      const includedIds = new Set(normalizedRows.map((row) => row.id));
+      return {
+        rows: normalizedRows,
+        byId,
+        childrenByManager,
+        includedIds,
+      };
     }
 
     const seedIds = normalizedRows
@@ -409,9 +425,10 @@ export function agentService(db: Db) {
   async function enterpriseGraphForCompany(
     companyId: string,
     visibleCompanyIds: string[] | null = null,
+    scopeMode: EnterpriseGraphScopeMode = "company",
   ): Promise<EnterpriseGraphView> {
     const normalizedRows = await buildVisibleOrgRows(visibleCompanyIds);
-    const scope = collectOrgScope(companyId, normalizedRows);
+    const scope = collectOrgScope(companyId, normalizedRows, scopeMode);
     const customTypes = new Map<string, EnterpriseRelationshipTypeCustomDefinition>();
     const secondaryLinkCount = new Map<string, number>();
 

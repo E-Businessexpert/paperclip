@@ -1220,7 +1220,8 @@ export function agentRoutes(db: Db) {
   router.get("/companies/:companyId/enterprise-graph", async (req, res) => {
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
-    res.json(await svc.enterpriseGraphForCompany(companyId, getVisibleCompanyIds(req)));
+    const scope = req.query.scope === "family" ? "family" : "company";
+    res.json(await svc.enterpriseGraphForCompany(companyId, getVisibleCompanyIds(req), scope));
   });
 
   router.get("/companies/:companyId/org.svg", async (req, res) => {

@@ -59,14 +59,15 @@ export function FullStructurePage() {
     <div className="h-[100dvh] bg-background p-3 md:p-5">
       <OrgChart
         fullscreen
-        lockViewMode="hierarchy"
+        initialViewMode="enterprise"
+        enterpriseScope="family"
         showBackButton
         backHref={backTo}
         title="Full Structure"
         subtitle={
           enterpriseRootCompany
-            ? `Hierarchy view rooted in ${enterpriseRootCompany.name}. Only the trust lane starts open; expand subdivisions as needed.`
-            : "Hierarchy view with only the top trust lane open at first."
+            ? `Family-wide wiring view rooted in ${enterpriseRootCompany.name}. Compare companies, collapse layers, and inspect routing across the full enterprise.`
+            : "Family-wide wiring view for the selected structure."
         }
       />
     </div>

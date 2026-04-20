@@ -135,7 +135,8 @@ export const queryKeys = {
   liveRuns: (companyId: string) => ["live-runs", companyId] as const,
   runIssues: (runId: string) => ["run-issues", runId] as const,
   org: (companyId: string) => ["org", companyId] as const,
-  enterpriseGraph: (companyId: string) => ["enterprise-graph", companyId] as const,
+  enterpriseGraph: (companyId: string, scope: "company" | "family" = "company") =>
+    ["enterprise-graph", companyId, scope] as const,
   skills: {
     available: ["skills", "available"] as const,
   },
