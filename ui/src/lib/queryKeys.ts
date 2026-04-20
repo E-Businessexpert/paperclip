@@ -14,6 +14,7 @@ export const queryKeys = {
   },
   agents: {
     list: (companyId: string) => ["agents", companyId] as const,
+    listGlobal: ["agents", "global"] as const,
     detail: (id: string) => ["agents", "detail", id] as const,
     runtimeState: (id: string) => ["agents", "runtime-state", id] as const,
     taskSessions: (id: string) => ["agents", "task-sessions", id] as const,
@@ -134,6 +135,8 @@ export const queryKeys = {
   liveRuns: (companyId: string) => ["live-runs", companyId] as const,
   runIssues: (runId: string) => ["run-issues", runId] as const,
   org: (companyId: string) => ["org", companyId] as const,
+  enterpriseGraph: (companyId: string, scope: "company" | "family" = "company") =>
+    ["enterprise-graph", companyId, scope] as const,
   skills: {
     available: ["skills", "available"] as const,
   },

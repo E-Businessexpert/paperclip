@@ -15,8 +15,26 @@ import {
   issueExecutionDecisions,
   issues,
   issueComments,
+  companies,
 } from "@paperclipai/db";
-import { isUuidLike, normalizeAgentUrlKey } from "@paperclipai/shared";
+import {
+  agentEnterpriseRelationshipsSchema,
+  BUILTIN_ENTERPRISE_WORKFLOW_PACKS,
+  isUuidLike,
+  normalizeAgentUrlKey,
+  resolveEnterpriseRelationshipTypes,
+  type AgentRole,
+  type AgentStatus,
+  type AgentEnterpriseRelationshipsRecord,
+  type AgentEnterpriseRelationshipsView,
+  type PauseReason,
+  type EnterpriseGraphLink,
+  type EnterpriseGraphNode,
+  type EnterpriseGraphOrgNode,
+  type EnterpriseGraphView,
+  type EnterpriseRelationshipTypeCustomDefinition,
+  type ResolvedAgentEnterpriseRelationshipLink,
+} from "@paperclipai/shared";
 import { conflict, notFound, unprocessable } from "../errors.js";
 import { normalizeAgentPermissions } from "./agent-permissions.js";
 import { REDACTED_EVENT_VALUE, sanitizeRecord } from "../redaction.js";
@@ -231,15 +249,259 @@ export function agentService(db: Db) {
     return new Map(rows.map((row) => [row.agentId, Number(row.spentMonthlyCents ?? 0)]));
   }
 
-  async function hydrateAgentSpend<T extends { id: string; companyId: string; spentMonthlyCents: number }>(rows: T[]) {
-    const agentIds = rows.map((row) => row.id);
-    const companyId = rows[0]?.companyId;
-    if (!companyId || agentIds.length === 0) return rows;
-    const spendByAgentId = await getMonthlySpendByAgentIds(companyId, agentIds);
+  async function getCompanyNamesByIds(companyIds: string[]) {
+    const uniqueCompanyIds = Array.from(new Set(companyIds.filter(Boolean)));
+    if (uniqueCompanyIds.length === 0) return new Map<string, string>();
+
+    const rows = await db
+      .select({
+        id: companies.id,
+        name: companies.name,
+      })
+      .from(companies)
+      .where(inArray(companies.id, uniqueCompanyIds));
+
+    return new Map(rows.map((row) => [row.id, row.name]));
+  }
+
+  async function attachCompanyNames<T extends { companyId: string }>(rows: T[]) {
+    const companyNames = await getCompanyNamesByIds(rows.map((row) => row.companyId));
     return rows.map((row) => ({
       ...row,
-      spentMonthlyCents: spendByAgentId.get(row.id) ?? 0,
+      companyName: companyNames.get(row.companyId) ?? null,
     }));
+  }
+
+  async function hydrateAgentSpend<T extends { id: string; companyId: string; spentMonthlyCents: number }>(rows: T[]) {
+    if (rows.length === 0) return rows;
+
+    const agentIdsByCompany = new Map<string, string[]>();
+    for (const row of rows) {
+      const group = agentIdsByCompany.get(row.companyId) ?? [];
+      group.push(row.id);
+      agentIdsByCompany.set(row.companyId, group);
+    }
+
+    const spendEntries = await Promise.all(
+      Array.from(agentIdsByCompany.entries()).map(async ([companyId, agentIds]) => [
+        companyId,
+        await getMonthlySpendByAgentIds(companyId, agentIds),
+      ] as const),
+    );
+    const spendByCompanyId = new Map(spendEntries);
+
+    return rows.map((row) => ({
+      ...row,
+      spentMonthlyCents: spendByCompanyId.get(row.companyId)?.get(row.id) ?? 0,
+    }));
+  }
+
+  type AgentOrgRow = ReturnType<typeof normalizeAgentRow> & {
+    companyName: string | null;
+  };
+
+  interface OrgScope {
+    rows: AgentOrgRow[];
+    byId: Map<string, AgentOrgRow>;
+    childrenByManager: Map<string, AgentOrgRow[]>;
+    includedIds: Set<string>;
+  }
+
+  async function buildVisibleOrgRows(visibleCompanyIds: string[] | null = null): Promise<AgentOrgRow[]> {
+    const rows = await (async () => {
+      if (visibleCompanyIds && visibleCompanyIds.length === 0) return [];
+      const conditions = [ne(agents.status, "terminated")];
+      if (visibleCompanyIds) {
+        conditions.push(inArray(agents.companyId, visibleCompanyIds));
+      }
+      return db.select().from(agents).where(and(...conditions));
+    })();
+    const hydratedRows = await hydrateAgentSpend(rows);
+    return attachCompanyNames(hydratedRows.map(normalizeAgentRow));
+  }
+
+  type EnterpriseGraphScopeMode = "company" | "family";
+
+  function collectOrgScope(
+    companyId: string,
+    normalizedRows: AgentOrgRow[],
+    scopeMode: EnterpriseGraphScopeMode = "company",
+  ): OrgScope {
+    const byId = new Map(normalizedRows.map((row) => [row.id, row]));
+    const childrenByManager = new Map<string, AgentOrgRow[]>();
+
+    for (const row of normalizedRows) {
+      if (!row.reportsTo || !byId.has(row.reportsTo)) continue;
+      const children = childrenByManager.get(row.reportsTo) ?? [];
+      children.push(row);
+      childrenByManager.set(row.reportsTo, children);
+    }
+
+    if (scopeMode === "family") {
+      const includedIds = new Set(normalizedRows.map((row) => row.id));
+      return {
+        rows: normalizedRows,
+        byId,
+        childrenByManager,
+        includedIds,
+      };
+    }
+
+    const seedIds = normalizedRows
+      .filter((row) => row.companyId === companyId)
+      .map((row) => row.id);
+    const includedIds = new Set<string>();
+
+    for (const seedId of seedIds) {
+      let cursorId: string | null = seedId;
+      while (cursorId) {
+        const current = byId.get(cursorId);
+        if (!current) break;
+        if (includedIds.has(current.id)) {
+          cursorId = current.reportsTo ?? null;
+          continue;
+        }
+        includedIds.add(current.id);
+        cursorId = current.reportsTo ?? null;
+      }
+    }
+
+    const queue = [...seedIds];
+    while (queue.length > 0) {
+      const currentId = queue.shift();
+      if (!currentId) continue;
+      includedIds.add(currentId);
+      for (const child of childrenByManager.get(currentId) ?? []) {
+        if (includedIds.has(child.id)) continue;
+        includedIds.add(child.id);
+        queue.push(child.id);
+      }
+    }
+
+    return {
+      rows: normalizedRows.filter((row) => includedIds.has(row.id)),
+      byId,
+      childrenByManager,
+      includedIds,
+    };
+  }
+
+  function sortOrgRows(left: AgentOrgRow, right: AgentOrgRow) {
+    const companyOrder = (left.companyName ?? "").localeCompare(right.companyName ?? "");
+    if (companyOrder !== 0) return companyOrder;
+    return left.name.localeCompare(right.name);
+  }
+
+  function buildOrgTree(companyId: string, scope: OrgScope): EnterpriseGraphOrgNode[] {
+    const { rows, byId, childrenByManager, includedIds } = scope;
+    const build = (memberId: string): EnterpriseGraphOrgNode => {
+      const member = byId.get(memberId);
+      if (!member) {
+        throw notFound("Agent not found while building org chart");
+      }
+      const children = (childrenByManager.get(memberId) ?? [])
+        .filter((child) => includedIds.has(child.id))
+        .sort(sortOrgRows)
+        .map((child) => build(child.id));
+
+      return {
+        id: member.id,
+        name: member.name,
+        role: member.role,
+        status: member.status,
+        companyId: member.companyId,
+        companyName: member.companyName,
+        externalToCompany: member.companyId !== companyId,
+        reports: children,
+      };
+    };
+
+    return rows
+      .filter((row) => !row.reportsTo || !includedIds.has(row.reportsTo))
+      .sort(sortOrgRows)
+      .map((row) => build(row.id));
+  }
+
+  async function enterpriseGraphForCompany(
+    companyId: string,
+    visibleCompanyIds: string[] | null = null,
+    scopeMode: EnterpriseGraphScopeMode = "company",
+  ): Promise<EnterpriseGraphView> {
+    const normalizedRows = await buildVisibleOrgRows(visibleCompanyIds);
+    const scope = collectOrgScope(companyId, normalizedRows, scopeMode);
+    const customTypes = new Map<string, EnterpriseRelationshipTypeCustomDefinition>();
+    const secondaryLinkCount = new Map<string, number>();
+
+    for (const row of scope.rows) {
+      const relationships = parseEnterpriseRelationshipsRecord(row.metadata);
+      for (const definition of relationships?.customTypes ?? []) {
+        customTypes.set(definition.key, definition);
+      }
+    }
+
+    const availableTypes = resolveEnterpriseRelationshipTypes(Array.from(customTypes.values()));
+    const typeByKey = new Map(availableTypes.map((definition) => [definition.key, definition]));
+    const links: EnterpriseGraphLink[] = [];
+
+    for (const row of scope.rows) {
+      const relationships = parseEnterpriseRelationshipsRecord(row.metadata);
+      for (const link of relationships?.links ?? []) {
+        const target = scope.byId.get(link.targetAgentId);
+        const definition = typeByKey.get(link.typeKey);
+        if (!target || !definition) continue;
+
+        links.push({
+          id: `${row.id}:${link.id}`,
+          sourceAgentId: row.id,
+          sourceAgentName: row.name,
+          sourceCompanyId: row.companyId,
+          sourceCompanyName: row.companyName,
+          targetAgentId: target.id,
+          targetAgentName: target.name,
+          targetCompanyId: target.companyId,
+          targetCompanyName: target.companyName,
+          typeKey: definition.key,
+          typeLabel: definition.label,
+          typeDescription: definition.description,
+          category: definition.category,
+          builtIn: definition.builtIn,
+          notes: link.notes ?? null,
+        });
+
+        secondaryLinkCount.set(row.id, (secondaryLinkCount.get(row.id) ?? 0) + 1);
+        secondaryLinkCount.set(target.id, (secondaryLinkCount.get(target.id) ?? 0) + 1);
+      }
+    }
+
+    const nodes: EnterpriseGraphNode[] = scope.rows
+      .slice()
+      .sort(sortOrgRows)
+      .map((row) => ({
+        ...row,
+        role: row.role as AgentRole,
+        status: row.status as AgentStatus,
+        pauseReason: row.pauseReason as PauseReason | null,
+        companyName: row.companyName,
+        externalToCompany: row.companyId !== companyId,
+        secondaryLinkCount: secondaryLinkCount.get(row.id) ?? 0,
+      }));
+
+    return {
+      companyId,
+      roots: buildOrgTree(companyId, scope),
+      nodes,
+      links: links.sort((left, right) => {
+        const categoryOrder = left.category.localeCompare(right.category);
+        if (categoryOrder !== 0) return categoryOrder;
+        const typeOrder = left.typeLabel.localeCompare(right.typeLabel);
+        if (typeOrder !== 0) return typeOrder;
+        const sourceOrder = left.sourceAgentName.localeCompare(right.sourceAgentName);
+        if (sourceOrder !== 0) return sourceOrder;
+        return left.targetAgentName.localeCompare(right.targetAgentName);
+      }),
+      availableTypes,
+      workflowPacks: [...BUILTIN_ENTERPRISE_WORKFLOW_PACKS],
+    };
   }
 
   async function getById(id: string) {
@@ -253,12 +515,102 @@ export function agentService(db: Db) {
     return normalizeAgentRow(hydrated);
   }
 
-  async function ensureManager(companyId: string, managerId: string) {
+  function parseEnterpriseRelationshipsRecord(
+    metadata: unknown,
+  ): AgentEnterpriseRelationshipsRecord | null {
+    const metadataRecord = isPlainRecord(metadata) ? metadata : null;
+    const rawRelationships = metadataRecord?.enterpriseRelationships;
+    if (!rawRelationships || !isPlainRecord(rawRelationships)) return null;
+    const parsed = agentEnterpriseRelationshipsSchema.safeParse(rawRelationships);
+    return parsed.success ? parsed.data : null;
+  }
+
+  function buildEnterpriseRelationshipsView(
+    record: AgentEnterpriseRelationshipsRecord | null,
+    resolvedLinks: ResolvedAgentEnterpriseRelationshipLink[],
+  ): AgentEnterpriseRelationshipsView {
+    const customTypes = record?.customTypes ?? [];
+    return {
+      version: 1,
+      updatedAt: record?.updatedAt ?? null,
+      customTypes,
+      availableTypes: resolveEnterpriseRelationshipTypes(customTypes),
+      links: resolvedLinks,
+    };
+  }
+
+  async function getEnterpriseRelationshipsView(agentId: string): Promise<AgentEnterpriseRelationshipsView> {
+    const agent = await getById(agentId);
+    if (!agent) {
+      return buildEnterpriseRelationshipsView(null, []);
+    }
+
+    const relationships = parseEnterpriseRelationshipsRecord(agent.metadata);
+    if (!relationships || relationships.links.length === 0) {
+      return buildEnterpriseRelationshipsView(relationships, []);
+    }
+
+    const typeByKey = new Map(
+      resolveEnterpriseRelationshipTypes(relationships.customTypes).map((definition) => [
+        definition.key,
+        definition,
+      ]),
+    );
+    const targetAgentIds = Array.from(
+      new Set(relationships.links.map((link) => link.targetAgentId).filter(Boolean)),
+    );
+
+    const targetRows = targetAgentIds.length
+      ? await db
+        .select({
+          id: agents.id,
+          companyId: agents.companyId,
+          name: agents.name,
+          role: agents.role,
+          title: agents.title,
+          status: agents.status,
+          companyName: companies.name,
+        })
+        .from(agents)
+        .leftJoin(companies, eq(agents.companyId, companies.id))
+        .where(inArray(agents.id, targetAgentIds))
+      : [];
+
+    const targetById = new Map(targetRows.map((row) => [row.id, row]));
+    const resolvedLinks = relationships.links
+      .map<ResolvedAgentEnterpriseRelationshipLink>((link) => {
+        const definition = typeByKey.get(link.typeKey);
+        const target = targetById.get(link.targetAgentId);
+        return {
+          ...link,
+          category: definition?.category ?? "custom",
+          builtIn: definition?.builtIn ?? false,
+          typeLabel: definition?.label ?? link.typeKey,
+          typeDescription: definition?.description ?? "Custom enterprise relationship",
+          typeAiSemantics: definition?.aiSemantics ?? null,
+          brokenTarget: !target,
+          targetAgentName: target?.name ?? null,
+          targetCompanyId: target?.companyId ?? null,
+          targetCompanyName: target?.companyName ?? null,
+          targetRole: (target?.role ?? null) as AgentRole | null,
+          targetTitle: target?.title ?? null,
+          targetStatus: (target?.status ?? null) as AgentStatus | null,
+        };
+      })
+      .sort((left, right) => {
+        const labelOrder = left.typeLabel.localeCompare(right.typeLabel);
+        if (labelOrder !== 0) return labelOrder;
+        const companyOrder = (left.targetCompanyName ?? "").localeCompare(right.targetCompanyName ?? "");
+        if (companyOrder !== 0) return companyOrder;
+        return (left.targetAgentName ?? "").localeCompare(right.targetAgentName ?? "");
+      });
+
+    return buildEnterpriseRelationshipsView(relationships, resolvedLinks);
+  }
+
+  async function ensureManager(_companyId: string, managerId: string) {
     const manager = await getById(managerId);
     if (!manager) throw notFound("Manager not found");
-    if (manager.companyId !== companyId) {
-      throw unprocessable("Manager must belong to same company");
-    }
     return manager;
   }
 
@@ -339,6 +691,34 @@ export function agentService(db: Db) {
       const role = (data.role ?? existing.role) as string;
       normalizedPatch.permissions = normalizeAgentPermissions(data.permissions, role);
     }
+    if (data.metadata !== undefined) {
+      if (data.metadata !== null && !isPlainRecord(data.metadata)) {
+        throw unprocessable("metadata must be an object or null");
+      }
+
+      const nextMetadata = isPlainRecord(data.metadata) ? { ...data.metadata } : null;
+      const rawEnterpriseRelationships = nextMetadata?.enterpriseRelationships;
+      if (rawEnterpriseRelationships !== undefined) {
+        if (!nextMetadata) {
+          throw unprocessable("metadata.enterpriseRelationships requires metadata to be an object");
+        }
+        if (rawEnterpriseRelationships === null) {
+          delete nextMetadata.enterpriseRelationships;
+        } else {
+          const parsed = agentEnterpriseRelationshipsSchema.safeParse(rawEnterpriseRelationships);
+          if (!parsed.success) {
+            const firstIssue = parsed.error.issues[0];
+            throw unprocessable(
+              `Invalid enterprise relationships metadata${firstIssue?.message ? `: ${firstIssue.message}` : ""}`,
+            );
+          }
+          nextMetadata.enterpriseRelationships = parsed.data;
+        }
+      }
+
+      normalizedPatch.metadata =
+        nextMetadata && Object.keys(nextMetadata).length > 0 ? nextMetadata : null;
+    }
 
     const shouldRecordRevision = Boolean(options?.recordRevision) && hasConfigPatchFields(normalizedPatch);
     const beforeConfig = shouldRecordRevision ? buildConfigSnapshot(existing) : null;
@@ -383,6 +763,32 @@ export function agentService(db: Db) {
       return hydrated.map(normalizeAgentRow);
     },
 
+    listVisible: async (companyIds: string[] | null, options?: { includeTerminated?: boolean }) => {
+      if (companyIds && companyIds.length === 0) return [];
+
+      const conditions = [];
+      if (companyIds) {
+        conditions.push(inArray(agents.companyId, companyIds));
+      }
+      if (!options?.includeTerminated) {
+        conditions.push(ne(agents.status, "terminated"));
+      }
+
+      const whereClause =
+        conditions.length === 0
+          ? undefined
+          : conditions.length === 1
+            ? conditions[0]
+            : and(...conditions);
+
+      const rows = whereClause
+        ? await db.select().from(agents).where(whereClause)
+        : await db.select().from(agents);
+      const hydrated = await hydrateAgentSpend(rows);
+      const normalized = hydrated.map(normalizeAgentRow);
+      return attachCompanyNames(normalized);
+    },
+
     getById,
 
     create: async (companyId: string, data: Omit<typeof agents.$inferInsert, "companyId">) => {
@@ -398,9 +804,41 @@ export function agentService(db: Db) {
 
       const role = data.role ?? "general";
       const normalizedPermissions = normalizeAgentPermissions(data.permissions, role);
+      let normalizedMetadata: Record<string, unknown> | null | undefined = data.metadata ?? null;
+      if (normalizedMetadata !== null && !isPlainRecord(normalizedMetadata)) {
+        throw unprocessable("metadata must be an object or null");
+      }
+      if (normalizedMetadata && normalizedMetadata.enterpriseRelationships !== undefined) {
+        if (normalizedMetadata.enterpriseRelationships === null) {
+          const nextMetadata = { ...normalizedMetadata };
+          delete nextMetadata.enterpriseRelationships;
+          normalizedMetadata = Object.keys(nextMetadata).length > 0 ? nextMetadata : null;
+        } else {
+          const parsed = agentEnterpriseRelationshipsSchema.safeParse(
+            normalizedMetadata.enterpriseRelationships,
+          );
+          if (!parsed.success) {
+            const firstIssue = parsed.error.issues[0];
+            throw unprocessable(
+              `Invalid enterprise relationships metadata${firstIssue?.message ? `: ${firstIssue.message}` : ""}`,
+            );
+          }
+          normalizedMetadata = {
+            ...normalizedMetadata,
+            enterpriseRelationships: parsed.data,
+          };
+        }
+      }
       const created = await db
         .insert(agents)
-        .values({ ...data, name: uniqueName, companyId, role, permissions: normalizedPermissions })
+        .values({
+          ...data,
+          metadata: normalizedMetadata,
+          name: uniqueName,
+          companyId,
+          role,
+          permissions: normalizedPermissions,
+        })
         .returning()
         .then((rows) => rows[0]);
 
@@ -478,6 +916,40 @@ export function agentService(db: Db) {
 
       return db.transaction(async (tx) => {
         await tx.update(agents).set({ reportsTo: null }).where(eq(agents.reportsTo, id));
+        const agentsWithRelationshipLinks = await tx
+          .select({
+            id: agents.id,
+            metadata: agents.metadata,
+          })
+          .from(agents)
+          .where(ne(agents.id, id));
+
+        for (const row of agentsWithRelationshipLinks) {
+          const relationships = parseEnterpriseRelationshipsRecord(row.metadata);
+          if (!relationships || relationships.links.length === 0) continue;
+
+          const nextLinks = relationships.links.filter((link) => link.targetAgentId !== id);
+          if (nextLinks.length === relationships.links.length) continue;
+
+          const metadataRecord = isPlainRecord(row.metadata) ? { ...row.metadata } : {};
+          if (nextLinks.length === 0 && relationships.customTypes.length === 0) {
+            delete metadataRecord.enterpriseRelationships;
+          } else {
+            metadataRecord.enterpriseRelationships = {
+              ...relationships,
+              links: nextLinks,
+              updatedAt: new Date().toISOString(),
+            };
+          }
+
+          await tx
+            .update(agents)
+            .set({
+              metadata: Object.keys(metadataRecord).length > 0 ? metadataRecord : null,
+              updatedAt: new Date(),
+            })
+            .where(eq(agents.id, row.id));
+        }
         await tx
           .update(issues)
           .set({ assigneeAgentId: null, createdByAgentId: null })
@@ -520,7 +992,17 @@ export function agentService(db: Db) {
       return updated ? normalizeAgentRow(updated) : null;
     },
 
-    updatePermissions: async (id: string, permissions: { canCreateAgents: boolean }) => {
+    updatePermissions: async (
+      id: string,
+      permissions: {
+        canCreateAgents: boolean;
+        canDesignOrganizations?: boolean;
+        canManageRelationshipTypes?: boolean;
+        canManageServiceDiscovery?: boolean;
+        canManageDeploymentAssignments?: boolean;
+        canGenerateSystemTopology?: boolean;
+      },
+    ) => {
       const existing = await getById(id);
       if (!existing) return null;
 
@@ -628,33 +1110,21 @@ export function agentService(db: Db) {
       return rows[0] ?? null;
     },
 
-    orgForCompany: async (companyId: string) => {
-      const rows = await db
-        .select()
-        .from(agents)
-        .where(and(eq(agents.companyId, companyId), ne(agents.status, "terminated")));
-      const normalizedRows = rows.map(normalizeAgentRow);
-      const byManager = new Map<string | null, typeof normalizedRows>();
-      for (const row of normalizedRows) {
-        const key = row.reportsTo ?? null;
-        const group = byManager.get(key) ?? [];
-        group.push(row);
-        byManager.set(key, group);
-      }
-
-      const build = (managerId: string | null): Array<Record<string, unknown>> => {
-        const members = byManager.get(managerId) ?? [];
-        return members.map((member) => ({
-          ...member,
-          reports: build(member.id),
-        }));
-      };
-
-      return build(null);
+    orgForCompany: async (companyId: string, visibleCompanyIds: string[] | null = null) => {
+      const normalizedRows = await buildVisibleOrgRows(visibleCompanyIds);
+      return buildOrgTree(companyId, collectOrgScope(companyId, normalizedRows));
     },
 
+    enterpriseGraphForCompany,
+
     getChainOfCommand: async (agentId: string) => {
-      const chain: { id: string; name: string; role: string; title: string | null }[] = [];
+      const chain: {
+        id: string;
+        companyId: string;
+        name: string;
+        role: string;
+        title: string | null;
+      }[] = [];
       const visited = new Set<string>([agentId]);
       const start = await getById(agentId);
       let currentId = start?.reportsTo ?? null;
@@ -662,11 +1132,27 @@ export function agentService(db: Db) {
         visited.add(currentId);
         const mgr = await getById(currentId);
         if (!mgr) break;
-        chain.push({ id: mgr.id, name: mgr.name, role: mgr.role, title: mgr.title ?? null });
+        chain.push({
+          id: mgr.id,
+          companyId: mgr.companyId,
+          name: mgr.name,
+          role: mgr.role,
+          title: mgr.title ?? null,
+        });
         currentId = mgr.reportsTo ?? null;
       }
-      return chain;
+      const companyNames = await getCompanyNamesByIds(chain.map((entry) => entry.companyId));
+      return chain.map((entry) => ({
+        id: entry.id,
+        companyId: entry.companyId,
+        companyName: companyNames.get(entry.companyId) ?? null,
+        name: entry.name,
+        role: entry.role,
+        title: entry.title,
+      }));
     },
+
+    getEnterpriseRelationshipsView,
 
     runningForAgent: (agentId: string) =>
       db

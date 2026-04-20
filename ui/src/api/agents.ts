@@ -1,6 +1,10 @@
 import type {
   Agent,
   AgentDetail,
+  AgentEnterpriseRelationshipsRecord,
+  AgentEnterpriseRelationshipsView,
+  EnterpriseGraphOrgNode,
+  EnterpriseGraphView,
   AgentInstructionsBundle,
   AgentInstructionsFileDetail,
   AgentSkillSnapshot,
@@ -44,13 +48,11 @@ export interface ClaudeLoginResult {
   stderr: string;
 }
 
-export interface OrgNode {
-  id: string;
-  name: string;
-  role: string;
-  status: string;
-  reports: OrgNode[];
+export interface AgentDirectoryEntry extends Agent {
+  companyName?: string | null;
 }
+
+export type OrgNode = EnterpriseGraphOrgNode;
 
 export interface AgentHireResponse {
   agent: Agent;
@@ -60,6 +62,18 @@ export interface AgentHireResponse {
 export interface AgentPermissionUpdate {
   canCreateAgents: boolean;
   canAssignTasks: boolean;
+  canDesignOrganizations?: boolean;
+  canManageRelationshipTypes?: boolean;
+  canManageServiceDiscovery?: boolean;
+  canManageDeploymentAssignments?: boolean;
+  canGenerateSystemTopology?: boolean;
+}
+
+export interface AgentEnterpriseRelationshipsUpdateResponse {
+  agentId: string;
+  companyId: string;
+  projectId: string | null;
+  enterpriseRelationships: AgentEnterpriseRelationshipsView;
 }
 
 function withCompanyScope(path: string, companyId?: string) {
@@ -74,18 +88,23 @@ function agentPath(id: string, companyId?: string, suffix = "") {
 
 export const agentsApi = {
   list: (companyId: string) => api.get<Agent[]>(`/companies/${companyId}/agents`),
+  listGlobal: () => api.get<AgentDirectoryEntry[]>("/instance/agents"),
   org: (companyId: string) => api.get<OrgNode[]>(`/companies/${companyId}/org`),
+  enterpriseGraph: (companyId: string, scope: "company" | "family" = "company") =>
+    api.get<EnterpriseGraphView>(
+      `/companies/${companyId}/enterprise-graph${scope === "family" ? "?scope=family" : ""}`,
+    ),
   listConfigurations: (companyId: string) =>
     api.get<Record<string, unknown>[]>(`/companies/${companyId}/agent-configurations`),
   get: async (id: string, companyId?: string) => {
     try {
       return await api.get<AgentDetail>(agentPath(id, companyId));
     } catch (error) {
-      // Backward-compat fallback: if backend shortname lookup reports ambiguity,
-      // resolve using company agent list while ignoring terminated agents.
+      // Shortname lookups are company-scoped on the backend. If the route points at
+      // the wrong company prefix, fall back to the visible global directory so the UI
+      // can recover to the agent's canonical company context.
       if (
         !(error instanceof ApiError) ||
-        error.status !== 409 ||
         !companyId ||
         isUuidLike(id)
       ) {
@@ -95,12 +114,35 @@ export const agentsApi = {
       const urlKey = normalizeAgentUrlKey(id);
       if (!urlKey) throw error;
 
-      const agents = await api.get<Agent[]>(`/companies/${companyId}/agents`);
-      const matches = agents.filter(
-        (agent) => agent.status !== "terminated" && normalizeAgentUrlKey(agent.urlKey) === urlKey,
-      );
-      if (matches.length !== 1) throw error;
-      return api.get<AgentDetail>(agentPath(matches[0]!.id, companyId));
+      if (error.status === 409) {
+        const agents = await api.get<Agent[]>(`/companies/${companyId}/agents`);
+        const matches = agents.filter(
+          (agent) => agent.status !== "terminated" && normalizeAgentUrlKey(agent.urlKey ?? agent.name ?? agent.id) === urlKey,
+        );
+        if (matches.length === 1) {
+          return api.get<AgentDetail>(agentPath(matches[0]!.id, companyId));
+        }
+        throw error;
+      }
+
+      if (error.status !== 404) {
+        throw error;
+      }
+
+      try {
+        const visibleAgents = await api.get<AgentDirectoryEntry[]>("/instance/agents");
+        const visibleMatches = visibleAgents.filter(
+          (agent) =>
+            agent.status !== "terminated"
+            && normalizeAgentUrlKey(agent.urlKey ?? agent.name ?? agent.id) === urlKey,
+        );
+        const exactCompanyMatch = visibleMatches.find((agent) => agent.companyId === companyId);
+        const fallbackMatch = exactCompanyMatch ?? (visibleMatches.length === 1 ? visibleMatches[0] : null);
+        if (!fallbackMatch) throw error;
+        return api.get<AgentDetail>(agentPath(fallbackMatch.id, fallbackMatch.companyId ?? companyId));
+      } catch {
+        throw error;
+      }
     }
   },
   getConfiguration: (id: string, companyId?: string) =>
@@ -119,6 +161,19 @@ export const agentsApi = {
     api.patch<Agent>(agentPath(id, companyId), data),
   updatePermissions: (id: string, data: AgentPermissionUpdate, companyId?: string) =>
     api.patch<AgentDetail>(agentPath(id, companyId, "/permissions"), data),
+  updateEnterpriseRelationships: (
+    id: string,
+    data: {
+      projectId?: string | null;
+      source?: string | null;
+      relationships: AgentEnterpriseRelationshipsRecord | null;
+    },
+    companyId?: string,
+  ) =>
+    api.put<AgentEnterpriseRelationshipsUpdateResponse>(
+      agentPath(id, companyId, "/enterprise-relationships"),
+      data,
+    ),
   instructionsBundle: (id: string, companyId?: string) =>
     api.get<AgentInstructionsBundle>(agentPath(id, companyId, "/instructions-bundle")),
   updateInstructionsBundle: (
