@@ -14,7 +14,7 @@ import {
   Users,
   Workflow,
 } from "lucide-react";
-import { Link, useLocation, useParams } from "@/lib/router";
+import { Link, useLocation } from "@/lib/router";
 import { Button } from "@/components/ui/button";
 import { agentsApi } from "../api/agents";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
@@ -22,7 +22,7 @@ import { useCompany } from "../context/CompanyContext";
 import { queryKeys } from "../lib/queryKeys";
 import { cn } from "../lib/utils";
 
-type CorporateLayer = "family" | "holding" | "operating";
+type CorporateLayer = "holding" | "organization";
 
 interface CompanyBlueprint {
   company: Company;
@@ -33,47 +33,39 @@ interface CompanyBlueprint {
   services: string[];
 }
 
-const layerOrder: CorporateLayer[] = ["family", "holding", "operating"];
+const layerOrder: CorporateLayer[] = ["holding", "organization"];
+// Backend contract name for the cross-company graph; the UI presents it as the global structure.
+const CROSS_COMPANY_GRAPH_SCOPE = "family" as const;
 
 const layerCopy: Record<CorporateLayer, {
   eyebrow: string;
   title: string;
   description: string;
 }> = {
-  family: {
-    eyebrow: "Ownership",
-    title: "Family vision and control",
-    description: "The top-level mandate that defines the enterprise, its continuity, and its long-term capital logic.",
-  },
   holding: {
     eyebrow: "Capital",
-    title: "Holding and allocation layer",
-    description: "The corporate layer that turns the vision into governance, allocation, and operating priorities.",
+    title: "Allocation and governance layer",
+    description: "Corporate coordination for capital, governance, shared systems, and portfolio priorities.",
   },
-  operating: {
-    eyebrow: "Execution",
-    title: "Standalone operating companies",
-    description: "Each company keeps its own mission while contributing to the larger corporation blueprint.",
+  organization: {
+    eyebrow: "Organizations",
+    title: "Removable organization layer",
+    description: "Every org remains replaceable, removable, and independent from the global full-structure feature.",
   },
 };
 
-function normalizePrefix(prefix: string | null | undefined): string | null {
-  return prefix ? prefix.toUpperCase() : null;
-}
-
 function classifyCompany(company: Company): CorporateLayer {
   const name = company.name.toLowerCase();
-  const prefix = company.issuePrefix.toUpperCase();
-
-  if (name.includes("family trust") || prefix === "FAM") {
-    return "family";
-  }
 
   if (name.includes("holding") || name.includes("capital") || name.includes("cornerstone")) {
     return "holding";
   }
 
-  return "operating";
+  return "organization";
+}
+
+function isTrustOrganization(company: Company): boolean {
+  return /trust/i.test(company.name) || company.issuePrefix.toUpperCase() === "FAM";
 }
 
 function layerSort(left: CompanyBlueprint, right: CompanyBlueprint): number {
@@ -128,15 +120,11 @@ function relationshipSummary(links: EnterpriseGraphLink[]): Array<{ key: string;
 function companyDescription(company: Company, layer: CorporateLayer): string {
   if (company.description) return company.description;
 
-  if (layer === "family") {
-    return "Enterprise-wide owner intent, continuity, and long-range decision architecture.";
-  }
-
   if (layer === "holding") {
-    return "Capital, governance, shared systems, and strategic coordination across the family enterprise.";
+    return "Capital, governance, shared systems, and strategic coordination across the corporation.";
   }
 
-  return "Focused operating company with its own market role, accountability, and execution surface.";
+  return "A standalone organization that can evolve or be removed without owning the full structure feature.";
 }
 
 function CompanyVisionCard({ blueprint }: { blueprint: CompanyBlueprint }) {
@@ -232,47 +220,34 @@ function StructureStat({
 }
 
 export function FullStructurePage() {
-  const { companyPrefix } = useParams<{ companyPrefix: string }>();
   const location = useLocation();
   const { companies, loading } = useCompany();
   const { setBreadcrumbs } = useBreadcrumbs();
-
-  const matchedCompany = useMemo(() => {
-    const normalizedPrefix = normalizePrefix(companyPrefix);
-    if (!normalizedPrefix) return null;
-    return companies.find((company) => company.issuePrefix.toUpperCase() === normalizedPrefix) ?? null;
-  }, [companies, companyPrefix]);
-
-  const enterpriseRootCompany = useMemo(() => {
-    if (matchedCompany && classifyCompany(matchedCompany) !== "operating") {
-      return matchedCompany;
-    }
-
-    return (
-      companies.find((company) => /family trust/i.test(company.name))
-      ?? companies.find((company) => /cornerstone|holding/i.test(company.name))
-      ?? matchedCompany
-      ?? companies[0]
-      ?? null
-    );
-  }, [companies, matchedCompany]);
-
-  const enterpriseGraphQuery = useQuery({
-    queryKey: enterpriseRootCompany
-      ? queryKeys.enterpriseGraph(enterpriseRootCompany.id, "family")
-      : ["enterprise-graph", "full-structure", "none"],
-    queryFn: () => agentsApi.enterpriseGraph(enterpriseRootCompany!.id, "family"),
-    enabled: !!enterpriseRootCompany,
-  });
-
-  useEffect(() => {
-    setBreadcrumbs([{ label: "Full Structure" }]);
-  }, [setBreadcrumbs]);
 
   const activeCompanies = useMemo(
     () => companies.filter((company) => company.status !== "archived"),
     [companies],
   );
+
+  const graphSeedCompany = useMemo(
+    () =>
+      activeCompanies.find((company) => !isTrustOrganization(company))
+      ?? activeCompanies[0]
+      ?? null,
+    [activeCompanies],
+  );
+
+  const enterpriseGraphQuery = useQuery({
+    queryKey: graphSeedCompany
+      ? queryKeys.enterpriseGraph(graphSeedCompany.id, CROSS_COMPANY_GRAPH_SCOPE)
+      : ["enterprise-graph", "full-structure", "none"],
+    queryFn: () => agentsApi.enterpriseGraph(graphSeedCompany!.id, CROSS_COMPANY_GRAPH_SCOPE),
+    enabled: !!graphSeedCompany,
+  });
+
+  useEffect(() => {
+    setBreadcrumbs([{ label: "Full Structure" }]);
+  }, [setBreadcrumbs]);
 
   const graphNodes = enterpriseGraphQuery.data?.nodes ?? [];
   const graphLinks = enterpriseGraphQuery.data?.links ?? [];
@@ -297,9 +272,8 @@ export function FullStructurePage() {
 
   const blueprintsByLayer = useMemo(() => {
     const grouped: Record<CorporateLayer, CompanyBlueprint[]> = {
-      family: [],
       holding: [],
-      operating: [],
+      organization: [],
     };
 
     for (const blueprint of blueprints) {
@@ -338,23 +312,22 @@ export function FullStructurePage() {
               </Button>
               <div className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-cyan-100">
                 <ShieldCheck className="h-3.5 w-3.5" />
-                Standalone corporation vision
+                Global corporation feature
               </div>
               <h1 className="mt-4 text-3xl font-semibold tracking-tight md:text-5xl">
                 Full Corporation Structure
               </h1>
               <p className="mt-4 max-w-2xl text-sm leading-6 text-white/72 md:text-base">
-                A separate enterprise blueprint for the full family corporation. This is not the
-                native Paperclip org chart; it keeps company identity, ownership intent, capital
-                control, and operating-company mandates in one standalone view.
+                A standalone feature for the full corporation. It is not rooted in Trust, FAM,
+                or any removable org; those are just organizations inside the map.
               </p>
               <p className="mt-3 text-xs text-white/54">
-                Rooted in {enterpriseRootCompany?.name ?? "the selected family company"}.
+                Independent of the selected organization and safe if Trust is removed.
               </p>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-3 lg:w-[34rem]">
-              <StructureStat icon={Building2} label="Companies" value={activeCompanies.length} detail="legal and operating entities" />
+              <StructureStat icon={Building2} label="Organizations" value={activeCompanies.length} detail="entities inside the feature" />
               <StructureStat icon={Users} label="Agents" value={graphNodes.length} detail="visible workforce nodes" />
               <StructureStat icon={Network} label="Links" value={graphLinks.length} detail="enterprise wiring points" />
             </div>
@@ -376,7 +349,7 @@ export function FullStructurePage() {
                   Corporation map
                 </p>
                 <h2 className="mt-1 text-2xl font-semibold tracking-tight text-foreground">
-                  Vision, capital, and operating companies
+                  Global feature, capital, and organizations
                 </h2>
               </div>
               <div className="rounded-full border border-border bg-muted/45 px-3 py-1 text-xs text-muted-foreground">
@@ -392,7 +365,7 @@ export function FullStructurePage() {
                     key={layer}
                     className={cn(
                       "relative rounded-[1.5rem] border border-border/70 bg-muted/24 p-4",
-                      layer !== "operating" && "after:absolute after:bottom-[-1rem] after:left-1/2 after:h-4 after:w-px after:bg-border",
+                      layer !== "organization" && "after:absolute after:bottom-[-1rem] after:left-1/2 after:h-4 after:w-px after:bg-border",
                     )}
                   >
                     <div className="mb-3 flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
@@ -411,7 +384,7 @@ export function FullStructurePage() {
                     {layerBlueprints.length > 0 ? (
                       <div className={cn(
                         "grid gap-3",
-                        layer === "operating" ? "md:grid-cols-2 xl:grid-cols-3" : "md:grid-cols-2",
+                        layer === "organization" ? "md:grid-cols-2 xl:grid-cols-3" : "md:grid-cols-2",
                       )}>
                         {layerBlueprints.map((blueprint) => (
                           <CompanyVisionCard key={blueprint.company.id} blueprint={blueprint} />
@@ -484,8 +457,8 @@ export function FullStructurePage() {
             <section className="rounded-[1.75rem] border border-border/70 bg-background/92 p-5 shadow-xl">
               <h2 className="text-base font-semibold text-foreground">Boundary note</h2>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                Use this page for the corporation-level vision. Use the native Paperclip org page
-                only when you need the agent hierarchy chart for a specific company.
+                Use this page for the global full-structure feature. Use native org pages only
+                when you need a company-specific hierarchy chart.
               </p>
             </section>
           </aside>
