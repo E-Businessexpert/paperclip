@@ -6,11 +6,117 @@ import {
   INBOX_MINE_ISSUE_STATUS_FILTER,
 } from "../constants.js";
 import { agentAdapterTypeSchema } from "../adapter-type.js";
+import { ENTERPRISE_RELATIONSHIP_CATEGORIES } from "../types/agent.js";
 import { envConfigSchema } from "./secret.js";
 
 export const agentPermissionsSchema = z.object({
   canCreateAgents: z.boolean().optional().default(false),
 });
+
+export const enterpriseRelationshipCategorySchema = z.enum(
+  ENTERPRISE_RELATIONSHIP_CATEGORIES,
+);
+
+export const enterpriseRelationshipTypeCustomDefinitionSchema = z
+  .object({
+    key: z.string().trim().min(1).max(80),
+    label: z.string().trim().min(1).max(120),
+    description: z.string().trim().min(1).max(500),
+    category: enterpriseRelationshipCategorySchema.default("custom"),
+    aiSemantics: z.string().trim().min(1).max(500).nullable().optional(),
+    builtIn: z.literal(false).optional(),
+  })
+  .passthrough();
+
+export const agentEnterpriseRelationshipLinkSchema = z
+  .object({
+    id: z.string().trim().min(1),
+    targetAgentId: z.string().trim().min(1),
+    typeKey: z.string().trim().min(1).max(80),
+    notes: z.string().trim().nullable().optional().default(null),
+    createdAt: z.string().trim().min(1).nullable().optional(),
+    updatedAt: z.string().trim().min(1).nullable().optional(),
+  })
+  .passthrough();
+
+export const agentEnterpriseRelationshipsSchema = z
+  .object({
+    version: z.literal(1).optional().default(1),
+    updatedAt: z.string().trim().min(1).nullable().optional().default(null),
+    customTypes: z
+      .array(enterpriseRelationshipTypeCustomDefinitionSchema)
+      .optional()
+      .default([]),
+    links: z.array(agentEnterpriseRelationshipLinkSchema).optional().default([]),
+  })
+  .passthrough();
+
+export type AgentEnterpriseRelationshipsInput = z.infer<
+  typeof agentEnterpriseRelationshipsSchema
+>;
+
+export const updateAgentEnterpriseRelationshipsSchema = z.object({
+  projectId: z.string().trim().min(1).nullable().optional(),
+  source: z.string().trim().min(1).nullable().optional(),
+  relationships: agentEnterpriseRelationshipsSchema.nullable(),
+});
+
+export type UpdateAgentEnterpriseRelationships = z.infer<
+  typeof updateAgentEnterpriseRelationshipsSchema
+>;
+
+export const agentServiceDiscoverySoftwareAssignmentSchema = z
+  .object({
+    id: z.string().trim().min(1).nullable().optional(),
+    assignmentKind: z.string().trim().min(1),
+    assignedAgentIds: z.array(z.string().trim().min(1)).optional().default([]),
+    assignedCapabilityKeys: z
+      .array(z.string().trim().min(1))
+      .optional()
+      .default([]),
+    notes: z.string().trim().nullable().optional(),
+  })
+  .passthrough();
+
+export const agentServiceDiscoveryServiceSchema = z
+  .object({
+    id: z.string().trim().min(1),
+    name: z.string().trim().min(1),
+    kind: z.string().trim().min(1),
+    hostKind: z.string().trim().min(1),
+    endpoint: z.string().trim().min(1).nullable().optional(),
+    url: z.string().trim().min(1).nullable().optional(),
+    description: z.string().trim().nullable().optional(),
+    softwareAssignments: z
+      .array(agentServiceDiscoverySoftwareAssignmentSchema)
+      .optional()
+      .default([]),
+    metadata: z.record(z.unknown()).nullable().optional(),
+  })
+  .passthrough();
+
+export const agentServiceDiscoveryCacheSchema = z
+  .object({
+    version: z.literal(1).optional().default(1),
+    cachedAt: z.string().trim().min(1).nullable().optional().default(null),
+    scope: z.string().trim().min(1).nullable().optional().default(null),
+    services: z.array(agentServiceDiscoveryServiceSchema).optional().default([]),
+  })
+  .passthrough();
+
+export type AgentServiceDiscoveryCacheInput = z.infer<
+  typeof agentServiceDiscoveryCacheSchema
+>;
+
+export const updateAgentServiceDiscoveryCacheSchema = z.object({
+  projectId: z.string().trim().min(1).nullable().optional(),
+  source: z.string().trim().min(1).nullable().optional(),
+  cache: agentServiceDiscoveryCacheSchema.nullable(),
+});
+
+export type UpdateAgentServiceDiscoveryCache = z.infer<
+  typeof updateAgentServiceDiscoveryCacheSchema
+>;
 
 export const agentInstructionsBundleModeSchema = z.enum(["managed", "external"]);
 

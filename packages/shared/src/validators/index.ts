@@ -99,6 +99,15 @@ export {
   testAdapterEnvironmentSchema,
   agentPermissionsSchema,
   updateAgentPermissionsSchema,
+  enterpriseRelationshipCategorySchema,
+  enterpriseRelationshipTypeCustomDefinitionSchema,
+  agentEnterpriseRelationshipLinkSchema,
+  agentEnterpriseRelationshipsSchema,
+  updateAgentEnterpriseRelationshipsSchema,
+  agentServiceDiscoverySoftwareAssignmentSchema,
+  agentServiceDiscoveryServiceSchema,
+  agentServiceDiscoveryCacheSchema,
+  updateAgentServiceDiscoveryCacheSchema,
   type CreateAgent,
   type CreateAgentHire,
   type UpdateAgent,
@@ -111,6 +120,10 @@ export {
   type ResetAgentSession,
   type TestAdapterEnvironment,
   type UpdateAgentPermissions,
+  type AgentEnterpriseRelationshipsInput,
+  type UpdateAgentEnterpriseRelationships,
+  type AgentServiceDiscoveryCacheInput,
+  type UpdateAgentServiceDiscoveryCache,
 } from "./agent.js";
 
 export {
