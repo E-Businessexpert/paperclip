@@ -60,13 +60,14 @@ export function FullStructurePage() {
       <OrgChart
         fullscreen
         initialViewMode="enterprise"
+        lockViewMode="enterprise"
         enterpriseScope="family"
         showBackButton
         backHref={backTo}
         title="Full Structure"
         subtitle={
           enterpriseRootCompany
-            ? `Family-wide wiring view rooted in ${enterpriseRootCompany.name}. Compare companies, collapse layers, and inspect routing across the full enterprise.`
+            ? `Expanded family-wide wiring view rooted in ${enterpriseRootCompany.name}. Compare companies and inspect routing across the full enterprise.`
             : "Family-wide wiring view for the selected structure."
         }
       />

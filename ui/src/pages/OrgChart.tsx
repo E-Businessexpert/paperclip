@@ -451,10 +451,7 @@ function persistOrgViewMode(nextViewMode: OrgViewMode) {
   }
 }
 
-function createDefaultWiringVisibility(
-  enterpriseScope: EnterpriseGraphScopeMode,
-  viewMode: OrgViewMode,
-): WiringVisibilityState {
+function createDefaultWiringVisibility(viewMode: OrgViewMode): WiringVisibilityState {
   if (viewMode !== "enterprise") {
     return {
       showCompanyContainers: false,
@@ -467,12 +464,11 @@ function createDefaultWiringVisibility(
     };
   }
 
-  const familyMode = enterpriseScope === "family";
   return {
     showCompanyContainers: true,
     showCompanyNames: true,
-    showAgents: !familyMode,
-    showAgentNames: !familyMode,
+    showAgents: true,
+    showAgentNames: true,
     showPermissions: false,
     showReportsToLines: true,
     showRelationshipLines: true,
@@ -526,10 +522,6 @@ function buildPreviewCollapsedNodeIds(
 
 function buildRootPreviewCollapsedNodeIds(roots: OrgNode[]): Set<string> {
   return buildPreviewCollapsedNodeIds(roots, 1);
-}
-
-function buildEnterprisePreviewCollapsedNodeIds(roots: OrgNode[]): Set<string> {
-  return buildPreviewCollapsedNodeIds(roots, 2);
 }
 
 function applyCollapsedReports(node: OrgNode, collapsedNodeIds: ReadonlySet<string>): OrgNode {
@@ -821,7 +813,7 @@ export function OrgChart({
   const [companyAFilter, setCompanyAFilter] = useState<string>(ALL_COMPANIES_FILTER);
   const [companyBFilter, setCompanyBFilter] = useState<string>(ALL_COMPANIES_FILTER);
   const [wiringVisibility, setWiringVisibility] = useState<WiringVisibilityState>(() =>
-    createDefaultWiringVisibility(enterpriseScope, initialStoredViewMode),
+    createDefaultWiringVisibility(initialStoredViewMode),
   );
   const [filtersOpen, setFiltersOpen] = useState(() => initialStoredViewMode === "enterprise");
   const [inspectorMinimized, setInspectorMinimized] = useState(false);
@@ -900,10 +892,10 @@ export function OrgChart({
     setRelationshipDirectionFilter("both");
     setCompanyAFilter(ALL_COMPANIES_FILTER);
     setCompanyBFilter(ALL_COMPANIES_FILTER);
-    setWiringVisibility(createDefaultWiringVisibility(enterpriseScope, effectiveViewMode));
+    setWiringVisibility(createDefaultWiringVisibility(effectiveViewMode));
     setFiltersOpen(effectiveViewMode === "enterprise");
     setInspectorMinimized(false);
-  }, [enterpriseScope, effectiveViewMode, selectedCompanyId]);
+  }, [effectiveViewMode, selectedCompanyId]);
 
   useEffect(() => {
     if (!wiringVisibility.showPermissions && selectedInspectorItem?.startsWith("permission:")) {
@@ -1020,13 +1012,8 @@ export function OrgChart({
       return;
     }
 
-    if (fullscreen && effectiveViewMode === "enterprise" && enterpriseScope === "family") {
-      setCollapsedNodeIds(buildEnterprisePreviewCollapsedNodeIds(rawRoots));
-      return;
-    }
-
     setCollapsedNodeIds(new Set());
-  }, [effectiveViewMode, enterpriseScope, fullscreen, rawRoots, selectedCompanyId]);
+  }, [effectiveViewMode, fullscreen, rawRoots, selectedCompanyId]);
 
   const activeRoots = useMemo(
     () => rawRoots.map((root) => applyCollapsedReports(root, collapsedNodeIds)),
@@ -1960,9 +1947,9 @@ export function OrgChart({
     setRelationshipDirectionFilter("both");
     setCompanyAFilter(ALL_COMPANIES_FILTER);
     setCompanyBFilter(ALL_COMPANIES_FILTER);
-    setWiringVisibility(createDefaultWiringVisibility(enterpriseScope, effectiveViewMode));
+    setWiringVisibility(createDefaultWiringVisibility(effectiveViewMode));
     setSelectedInspectorItem(null);
-  }, [effectiveViewMode, enterpriseScope]);
+  }, [effectiveViewMode]);
 
   const handleWiringVisibilityChange = useCallback(
     (key: keyof WiringVisibilityState, checked: boolean) => {
