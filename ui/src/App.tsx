@@ -50,6 +50,7 @@ import { queryKeys } from "./lib/queryKeys";
 import { useCompany } from "./context/CompanyContext";
 import { useDialog } from "./context/DialogContext";
 import { loadLastInboxTab } from "./lib/inbox";
+import { toCompanyRelativePath } from "./lib/company-routes";
 import { shouldRedirectCompanylessRouteToOnboarding } from "./lib/onboarding-route";
 
 function BootstrapPendingPage({ hasActiveInvite = false }: { hasActiveInvite?: boolean }) {
@@ -283,12 +284,37 @@ function UnprefixedBoardRedirect() {
     return <NoCompaniesStartPage />;
   }
 
+  const companyRelativePath = toCompanyRelativePath(location.pathname);
+
   return (
     <Navigate
-      to={`/${targetCompany.issuePrefix}${location.pathname}${location.search}${location.hash}`}
+      to={`/${targetCompany.issuePrefix}${companyRelativePath}${location.search}${location.hash}`}
       replace
     />
   );
+}
+
+function DuplicateFullStructureRedirect() {
+  const location = useLocation();
+  const { companyPrefix, duplicateCompanyPrefix } = useParams<{
+    companyPrefix?: string;
+    duplicateCompanyPrefix?: string;
+  }>();
+
+  if (
+    companyPrefix
+    && duplicateCompanyPrefix
+    && companyPrefix.toUpperCase() === duplicateCompanyPrefix.toUpperCase()
+  ) {
+    return (
+      <Navigate
+        to={`/${companyPrefix}/full-structure${location.search}${location.hash}`}
+        replace
+      />
+    );
+  }
+
+  return <NotFoundPage scope="global" />;
 }
 
 function NoCompaniesStartPage() {
@@ -358,6 +384,7 @@ export function App() {
           <Route path="execution-workspaces/:workspaceId/issues" element={<UnprefixedBoardRedirect />} />
           <Route path="tests/ux/chat" element={<UnprefixedBoardRedirect />} />
           <Route path="tests/ux/runs" element={<UnprefixedBoardRedirect />} />
+          <Route path=":companyPrefix/:duplicateCompanyPrefix/full-structure" element={<DuplicateFullStructureRedirect />} />
           <Route path=":companyPrefix" element={<Layout />}>
             {boardRoutes()}
           </Route>

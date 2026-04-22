@@ -28,6 +28,14 @@ describe("company routes", () => {
     );
   });
 
+  it("treats full structure as a board route and avoids duplicated company prefixes", () => {
+    expect(isBoardPathWithoutPrefix("/full-structure")).toBe(true);
+    expect(extractCompanyPrefixFromPath("/full-structure")).toBeNull();
+    expect(applyCompanyPrefix("/full-structure", "FAM")).toBe("/FAM/full-structure");
+    expect(applyCompanyPrefix("/FAM/full-structure", "FAM")).toBe("/FAM/full-structure");
+    expect(toCompanyRelativePath("/FAM/full-structure")).toBe("/full-structure");
+  });
+
   /**
    * Regression tests for https://github.com/paperclipai/paperclip/issues/2910
    *
