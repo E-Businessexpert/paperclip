@@ -135,7 +135,7 @@ function boardRoutes() {
       <Route path="settings/*" element={<LegacySettingsRedirect />} />
       <Route path="plugins/:pluginId" element={<PluginPage />} />
       <Route path="org" element={<OrgChart />} />
-      <Route path="full-structure" element={<FullStructureCompanyRedirect />} />
+      <Route path="full-structure" element={<FullStructurePage />} />
       <Route path="agents" element={<Navigate to="/agents/all" replace />} />
       <Route path="agents/all" element={<Agents />} />
       <Route path="agents/active" element={<Agents />} />
@@ -317,11 +317,6 @@ function DuplicateFullStructureRedirect() {
   return <NotFoundPage scope="global" />;
 }
 
-function FullStructureCompanyRedirect() {
-  const location = useLocation();
-  return <Navigate to={`/full-structure${location.search}${location.hash}`} replace />;
-}
-
 function NoCompaniesStartPage() {
   const { openOnboarding } = useDialog();
 
@@ -390,6 +385,7 @@ export function App() {
           <Route path="tests/ux/chat" element={<UnprefixedBoardRedirect />} />
           <Route path="tests/ux/runs" element={<UnprefixedBoardRedirect />} />
           <Route path=":companyPrefix/:duplicateCompanyPrefix/full-structure" element={<DuplicateFullStructureRedirect />} />
+          <Route path=":companyPrefix/full-structure" element={<FullStructurePage />} />
           <Route path=":companyPrefix" element={<Layout />}>
             {boardRoutes()}
           </Route>

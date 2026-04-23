@@ -4,6 +4,7 @@ import type {
   Company,
   EnterpriseGraphLink,
   EnterpriseGraphNode,
+  EnterpriseGraphOrgNode,
 } from "@paperclipai/shared";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -21,7 +22,7 @@ import {
   Workflow,
   X,
 } from "lucide-react";
-import { Link, useLocation } from "@/lib/router";
+import { Link, useLocation, useParams } from "@/lib/router";
 import { Button } from "@/components/ui/button";
 import { agentsApi } from "../api/agents";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
@@ -29,16 +30,30 @@ import { useCompany } from "../context/CompanyContext";
 import { queryKeys } from "../lib/queryKeys";
 import { cn } from "../lib/utils";
 
-type CorporateLayer = "holding" | "organization";
-type LayerFilter = "all" | CorporateLayer;
+type TierFilter = "all" | string;
+type CompanyWireKind = "hierarchy" | "relationship";
 
 interface CompanyBlueprint {
   company: Company;
-  layer: CorporateLayer;
+  hierarchyLevel: number;
   agents: EnterpriseGraphNode[];
-  incoming: EnterpriseGraphLink[];
-  outgoing: EnterpriseGraphLink[];
+  hierarchyIncoming: CompanyWireEdge[];
+  hierarchyOutgoing: CompanyWireEdge[];
+  relationshipIncoming: CompanyWireEdge[];
+  relationshipOutgoing: CompanyWireEdge[];
   services: string[];
+}
+
+interface CompanyWireEdge {
+  key: string;
+  sourceCompanyId: string;
+  sourceCompanyName: string | null;
+  targetCompanyId: string;
+  targetCompanyName: string | null;
+  category: string;
+  label: string;
+  count: number;
+  kind: CompanyWireKind;
 }
 
 interface CompanyGraphNode {
@@ -56,7 +71,7 @@ interface CompanyGraphEdge {
   category: string;
   label: string;
   count: number;
-  dashed?: boolean;
+  kind: CompanyWireKind;
 }
 
 interface CompanyGraphLayout {
@@ -66,50 +81,28 @@ interface CompanyGraphLayout {
   edges: CompanyGraphEdge[];
 }
 
-const layerOrder: CorporateLayer[] = ["holding", "organization"];
 // Backend contract name for the cross-company graph; the UI presents it as the global structure.
 const CROSS_COMPANY_GRAPH_SCOPE = "family" as const;
 const GRAPH_NODE_WIDTH = 246;
 const GRAPH_NODE_HEIGHT = 118;
 const GRAPH_COLUMN_GAP = 58;
-const GRAPH_ROW_GAP = 210;
+const GRAPH_ROW_GAP = 190;
 const GRAPH_MARGIN_X = 86;
 
-const layerCopy: Record<CorporateLayer, {
-  eyebrow: string;
-  title: string;
-  description: string;
-}> = {
-  holding: {
-    eyebrow: "Capital",
-    title: "Allocation and governance layer",
-    description: "Corporate coordination for capital, governance, shared systems, and portfolio priorities.",
-  },
-  organization: {
-    eyebrow: "Organizations",
-    title: "Removable organization layer",
-    description: "Every org remains replaceable, removable, and independent from the global full-structure feature.",
-  },
-};
-
-function classifyCompany(company: Company): CorporateLayer {
-  const name = company.name.toLowerCase();
-
-  if (name.includes("holding") || name.includes("capital") || name.includes("cornerstone")) {
-    return "holding";
-  }
-
-  return "organization";
-}
-
-function isTrustOrganization(company: Company): boolean {
-  return /trust/i.test(company.name) || company.issuePrefix.toUpperCase() === "FAM";
-}
-
-function layerSort(left: CompanyBlueprint, right: CompanyBlueprint): number {
-  const layerDelta = layerOrder.indexOf(left.layer) - layerOrder.indexOf(right.layer);
-  if (layerDelta !== 0) return layerDelta;
+function blueprintSort(left: CompanyBlueprint, right: CompanyBlueprint): number {
+  const levelDelta = left.hierarchyLevel - right.hierarchyLevel;
+  if (levelDelta !== 0) return levelDelta;
   return left.company.name.localeCompare(right.company.name);
+}
+
+function hierarchyTierLabel(level: number): string {
+  return `Tier ${level + 1}`;
+}
+
+function hierarchyTierDescription(level: number): string {
+  return level === 0
+    ? "Route roots and companies with no upstream inter-company reporting parent."
+    : `Companies reached ${level} inter-company reporting step${level === 1 ? "" : "s"} below the route roots.`;
 }
 
 function formatLabel(value: string | null | undefined): string {
@@ -140,12 +133,12 @@ function deriveServices(agents: EnterpriseGraphNode[]): string[] {
   return services;
 }
 
-function relationshipSummary(links: EnterpriseGraphLink[]): Array<{ key: string; label: string; count: number }> {
+function relationshipSummary(links: CompanyWireEdge[]): Array<{ key: string; label: string; count: number }> {
   const counts = new Map<string, { label: string; count: number }>();
 
   for (const link of links) {
     const current = counts.get(link.category) ?? { label: formatLabel(link.category), count: 0 };
-    current.count += 1;
+    current.count += link.count;
     counts.set(link.category, current);
   }
 
@@ -155,14 +148,10 @@ function relationshipSummary(links: EnterpriseGraphLink[]): Array<{ key: string;
     .slice(0, 8);
 }
 
-function companyDescription(company: Company, layer: CorporateLayer): string {
+function companyDescription(company: Company): string {
   if (company.description) return company.description;
 
-  if (layer === "holding") {
-    return "Capital, governance, shared systems, and strategic coordination across the corporation.";
-  }
-
-  return "A standalone organization that can evolve or be removed without owning the full structure feature.";
+  return "A company in the live route-derived structure. Its position is based on reporting hierarchy and inter-company wiring.";
 }
 
 function matchesBlueprintSearch(blueprint: CompanyBlueprint, searchTerm: string): boolean {
@@ -170,7 +159,7 @@ function matchesBlueprintSearch(blueprint: CompanyBlueprint, searchTerm: string)
   const haystack = [
     blueprint.company.name,
     blueprint.company.issuePrefix,
-    layerCopy[blueprint.layer].title,
+    hierarchyTierLabel(blueprint.hierarchyLevel),
     ...blueprint.services,
   ].join(" ").toLowerCase();
 
@@ -180,8 +169,10 @@ function matchesBlueprintSearch(blueprint: CompanyBlueprint, searchTerm: string)
 function hasRelationshipCategory(blueprint: CompanyBlueprint, category: string): boolean {
   if (category === "all") return true;
   return (
-    blueprint.incoming.some((link) => link.category === category)
-    || blueprint.outgoing.some((link) => link.category === category)
+    blueprint.hierarchyIncoming.some((link) => link.category === category)
+    || blueprint.hierarchyOutgoing.some((link) => link.category === category)
+    || blueprint.relationshipIncoming.some((link) => link.category === category)
+    || blueprint.relationshipOutgoing.some((link) => link.category === category)
   );
 }
 
@@ -205,21 +196,130 @@ function splitLabel(value: string, maxLineLength = 23): string[] {
   return lines.length > 0 ? lines : [value];
 }
 
+function collectCompanyHierarchyEdges(roots: EnterpriseGraphOrgNode[]): CompanyWireEdge[] {
+  const edgeCounts = new Map<string, CompanyWireEdge>();
+
+  function visit(node: EnterpriseGraphOrgNode, parent: EnterpriseGraphOrgNode | null) {
+    if (parent && parent.companyId !== node.companyId) {
+      const key = `${parent.companyId}:${node.companyId}:reports-to`;
+      const current = edgeCounts.get(key) ?? {
+        key,
+        sourceCompanyId: parent.companyId,
+        sourceCompanyName: parent.companyName,
+        targetCompanyId: node.companyId,
+        targetCompanyName: node.companyName,
+        category: "reports-to",
+        label: "Reports-to",
+        count: 0,
+        kind: "hierarchy" as const,
+      };
+      current.count += 1;
+      edgeCounts.set(key, current);
+    }
+
+    node.reports.forEach((child) => visit(child, node));
+  }
+
+  roots.forEach((root) => visit(root, null));
+  return Array.from(edgeCounts.values()).sort((left, right) =>
+    (left.sourceCompanyName ?? "").localeCompare(right.sourceCompanyName ?? "") ||
+    (left.targetCompanyName ?? "").localeCompare(right.targetCompanyName ?? "") ||
+    left.key.localeCompare(right.key),
+  );
+}
+
+function collectCompanyRelationshipEdges(links: EnterpriseGraphLink[]): CompanyWireEdge[] {
+  const edgeCounts = new Map<string, CompanyWireEdge>();
+
+  for (const link of links) {
+    if (!link.sourceCompanyId || !link.targetCompanyId) continue;
+    if (link.sourceCompanyId === link.targetCompanyId) continue;
+
+    const key = `${link.sourceCompanyId}:${link.targetCompanyId}:${link.category}`;
+    const current = edgeCounts.get(key) ?? {
+      key,
+      sourceCompanyId: link.sourceCompanyId,
+      sourceCompanyName: link.sourceCompanyName,
+      targetCompanyId: link.targetCompanyId,
+      targetCompanyName: link.targetCompanyName,
+      category: link.category,
+      label: formatLabel(link.category),
+      count: 0,
+      kind: "relationship" as const,
+    };
+    current.count += 1;
+    edgeCounts.set(key, current);
+  }
+
+  return Array.from(edgeCounts.values()).sort((left, right) =>
+    left.category.localeCompare(right.category)
+    || (left.sourceCompanyName ?? "").localeCompare(right.sourceCompanyName ?? "")
+    || (left.targetCompanyName ?? "").localeCompare(right.targetCompanyName ?? "")
+    || left.key.localeCompare(right.key),
+  );
+}
+
+function buildCompanyHierarchyLevels(
+  companies: Company[],
+  hierarchyEdges: CompanyWireEdge[],
+): Map<string, number> {
+  const companyIds = new Set(companies.map((company) => company.id));
+  const incoming = new Map<string, number>();
+  const outgoing = new Map<string, string[]>();
+
+  for (const edge of hierarchyEdges) {
+    if (!companyIds.has(edge.sourceCompanyId) || !companyIds.has(edge.targetCompanyId)) continue;
+    incoming.set(edge.targetCompanyId, (incoming.get(edge.targetCompanyId) ?? 0) + edge.count);
+    const children = outgoing.get(edge.sourceCompanyId) ?? [];
+    if (!children.includes(edge.targetCompanyId)) children.push(edge.targetCompanyId);
+    outgoing.set(edge.sourceCompanyId, children);
+  }
+
+  const levels = new Map<string, number>();
+  const queue: Array<{ id: string; level: number }> = companies
+    .filter((company) => !incoming.has(company.id))
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map((company) => ({ id: company.id, level: 0 }));
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) continue;
+
+    const existing = levels.get(current.id);
+    if (existing !== undefined && existing >= current.level) continue;
+    levels.set(current.id, current.level);
+
+    for (const childId of outgoing.get(current.id) ?? []) {
+      queue.push({ id: childId, level: current.level + 1 });
+    }
+  }
+
+  for (const company of companies) {
+    if (!levels.has(company.id)) levels.set(company.id, 0);
+  }
+
+  return levels;
+}
+
 function buildGraphLayout(
   blueprints: CompanyBlueprint[],
-  links: EnterpriseGraphLink[],
+  links: CompanyWireEdge[],
   minimumWidth = 1280,
 ): CompanyGraphLayout {
-  const holdings = blueprints.filter((blueprint) => blueprint.layer === "holding");
-  const organizations = blueprints.filter((blueprint) => blueprint.layer === "organization");
-  const organizationColumns = Math.min(Math.max(organizations.length, holdings.length, 4), 8);
+  const levels = Array.from(new Set(blueprints.map((blueprint) => blueprint.hierarchyLevel))).sort((left, right) => left - right);
+  const maxRowSize = levels.reduce((max, level) => {
+    const count = blueprints.filter((blueprint) => blueprint.hierarchyLevel === level).length;
+    return Math.max(max, count);
+  }, 1);
+  const columns = Math.min(Math.max(maxRowSize, 3), 6);
   const graphWidth = Math.max(
     minimumWidth,
-    organizationColumns * GRAPH_NODE_WIDTH
-      + Math.max(organizationColumns - 1, 0) * GRAPH_COLUMN_GAP
+    columns * GRAPH_NODE_WIDTH
+      + Math.max(columns - 1, 0) * GRAPH_COLUMN_GAP
       + GRAPH_MARGIN_X * 2,
   );
   const nodes: CompanyGraphNode[] = [];
+  let cursorY = 104;
 
   function addRow(rowBlueprints: CompanyBlueprint[], y: number, columnLimit = rowBlueprints.length) {
     if (rowBlueprints.length === 0) return;
@@ -242,9 +342,14 @@ function buildGraphLayout(
     });
   }
 
-  const organizationStartY = holdings.length > 0 ? 360 : 132;
-  addRow(holdings, 118, Math.max(holdings.length, 1));
-  addRow(organizations, organizationStartY, organizationColumns);
+  for (const level of levels) {
+    const rowBlueprints = blueprints
+      .filter((blueprint) => blueprint.hierarchyLevel === level)
+      .sort((left, right) => left.company.name.localeCompare(right.company.name));
+    addRow(rowBlueprints, cursorY, columns);
+    const rowCount = Math.max(1, Math.ceil(rowBlueprints.length / columns));
+    cursorY += rowCount * GRAPH_ROW_GAP;
+  }
 
   const nodeByCompanyId = new Map(nodes.map((node) => [node.blueprint.company.id, node]));
   const edgeCounts = new Map<string, {
@@ -253,6 +358,7 @@ function buildGraphLayout(
     category: string;
     label: string;
     count: number;
+    kind: CompanyWireKind;
   }>();
 
   for (const link of links) {
@@ -265,10 +371,11 @@ function buildGraphLayout(
       sourceId: link.sourceCompanyId,
       targetId: link.targetCompanyId,
       category: link.category,
-      label: formatLabel(link.category),
+      label: link.label,
       count: 0,
+      kind: link.kind,
     };
-    current.count += 1;
+    current.count += link.count;
     edgeCounts.set(key, current);
   }
 
@@ -277,33 +384,13 @@ function buildGraphLayout(
       const source = nodeByCompanyId.get(edge.sourceId);
       const target = nodeByCompanyId.get(edge.targetId);
       if (!source || !target) return null;
-      return { key, source, target, category: edge.category, label: edge.label, count: edge.count };
+      return { key, source, target, category: edge.category, label: edge.label, count: edge.count, kind: edge.kind };
     })
     .filter((edge): edge is CompanyGraphEdge => edge !== null);
 
-  if (edges.length === 0 && holdings.length > 0 && organizations.length > 0) {
-    const holdingNode = nodeByCompanyId.get(holdings[0]!.company.id);
-    if (holdingNode) {
-      for (const organization of organizations) {
-        const target = nodeByCompanyId.get(organization.company.id);
-        if (!target) continue;
-        edges.push({
-          key: `portfolio:${organization.company.id}`,
-          source: holdingNode,
-          target,
-          category: "portfolio",
-          label: "Portfolio",
-          count: 1,
-          dashed: true,
-        });
-      }
-    }
-  }
-
-  const organizationRows = Math.max(1, Math.ceil(organizations.length / organizationColumns));
   const graphHeight = Math.max(
     620,
-    organizationStartY + organizationRows * GRAPH_ROW_GAP + GRAPH_NODE_HEIGHT,
+    cursorY + GRAPH_NODE_HEIGHT,
   );
 
   return {
@@ -369,7 +456,11 @@ function StructureStat({
 
 function CompanyVisionCard({ blueprint }: { blueprint: CompanyBlueprint }) {
   const accent = blueprint.company.brandColor ?? "#2563eb";
-  const totalRelationships = blueprint.incoming.length + blueprint.outgoing.length;
+  const hierarchyLinks = blueprint.hierarchyIncoming.reduce((total, edge) => total + edge.count, 0)
+    + blueprint.hierarchyOutgoing.reduce((total, edge) => total + edge.count, 0);
+  const enterpriseLinks = blueprint.relationshipIncoming.reduce((total, edge) => total + edge.count, 0)
+    + blueprint.relationshipOutgoing.reduce((total, edge) => total + edge.count, 0);
+  const totalRelationships = hierarchyLinks + enterpriseLinks;
 
   return (
     <article className="group relative overflow-hidden rounded-2xl border border-border/70 bg-background/88 p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-lg">
@@ -392,15 +483,15 @@ function CompanyVisionCard({ blueprint }: { blueprint: CompanyBlueprint }) {
             </span>
           </div>
           <p className="mt-1 line-clamp-3 text-xs leading-5 text-muted-foreground">
-            {companyDescription(blueprint.company, blueprint.layer)}
+            {companyDescription(blueprint.company)}
           </p>
         </div>
       </div>
 
       <div className="mt-4 grid grid-cols-3 gap-2">
         <MetricPill label="Agents" value={blueprint.agents.length} />
-        <MetricPill label="Inbound" value={blueprint.incoming.length} />
-        <MetricPill label="Outbound" value={blueprint.outgoing.length} />
+        <MetricPill label="Hierarchy" value={hierarchyLinks} />
+        <MetricPill label="Enterprise" value={enterpriseLinks} />
       </div>
 
       <div className="mt-4">
@@ -408,7 +499,7 @@ function CompanyVisionCard({ blueprint }: { blueprint: CompanyBlueprint }) {
           Mandate signals
         </p>
         <div className="mt-2 flex flex-wrap gap-1.5">
-          {(blueprint.services.length > 0 ? blueprint.services : [layerCopy[blueprint.layer].eyebrow]).map((service) => (
+          {(blueprint.services.length > 0 ? blueprint.services : [hierarchyTierLabel(blueprint.hierarchyLevel)]).map((service) => (
             <span
               key={service}
               className="rounded-full border border-border bg-muted/50 px-2 py-1 text-[11px] text-foreground/80"
@@ -420,8 +511,8 @@ function CompanyVisionCard({ blueprint }: { blueprint: CompanyBlueprint }) {
       </div>
 
       <div className="mt-4 flex items-center justify-between border-t border-border/70 pt-3 text-[11px] text-muted-foreground">
-        <span>{layerCopy[blueprint.layer].eyebrow} layer</span>
-        <span>{totalRelationships} enterprise links</span>
+        <span>{hierarchyTierLabel(blueprint.hierarchyLevel)}</span>
+        <span>{totalRelationships} total links</span>
       </div>
     </article>
   );
@@ -460,15 +551,16 @@ function CompanyGraphCanvas({
   isLoading: boolean;
 }) {
   return (
-    <div className="relative min-h-0 flex-1 overflow-auto bg-slate-950">
+    <div className="relative min-h-[620px] flex-1 overflow-hidden bg-slate-950">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_16%,rgba(34,211,238,0.16),transparent_34%),radial-gradient(circle_at_82%_20%,rgba(16,185,129,0.13),transparent_32%),linear-gradient(135deg,#020617,#0f172a_48%,#020617)]" />
       <svg
-        width={layout.width}
-        height={layout.height}
+        width="100%"
+        height="100%"
         viewBox={`0 0 ${layout.width} ${layout.height}`}
+        preserveAspectRatio="xMidYMid meet"
         role="img"
         aria-label="Full corporation structure graph"
-        className="relative z-10 block"
+        className="absolute inset-0 z-10 block h-full w-full"
       >
         <defs>
           <pattern id="full-structure-grid" width="36" height="36" patternUnits="userSpaceOnUse">
@@ -495,9 +587,9 @@ function CompanyGraphCanvas({
               <path
                 d={edgePath(edge)}
                 fill="none"
-                stroke={edge.dashed ? "rgba(148,163,184,0.48)" : "rgba(103,232,249,0.72)"}
-                strokeWidth={edge.dashed ? 1.6 : Math.min(3.5, 1.6 + edge.count * 0.35)}
-                strokeDasharray={edge.dashed ? "8 8" : undefined}
+                stroke={edge.kind === "hierarchy" ? "rgba(56,189,248,0.84)" : "rgba(52,211,153,0.74)"}
+                strokeWidth={Math.min(4, 1.8 + edge.count * 0.35)}
+                strokeDasharray={edge.kind === "relationship" ? "8 7" : undefined}
                 markerEnd="url(#full-structure-arrow)"
               />
               <g transform={`translate(${labelPosition.x} ${labelPosition.y})`}>
@@ -528,8 +620,12 @@ function CompanyGraphCanvas({
         {layout.nodes.map((node) => {
           const accent = node.blueprint.company.brandColor ?? "#22d3ee";
           const labelLines = splitLabel(node.blueprint.company.name);
-          const relationshipCount = node.blueprint.incoming.length + node.blueprint.outgoing.length;
-          const removableLabel = isTrustOrganization(node.blueprint.company) ? "Removable org" : layerCopy[node.blueprint.layer].eyebrow;
+          const relationshipCount =
+            node.blueprint.hierarchyIncoming.reduce((total, edge) => total + edge.count, 0)
+            + node.blueprint.hierarchyOutgoing.reduce((total, edge) => total + edge.count, 0)
+            + node.blueprint.relationshipIncoming.reduce((total, edge) => total + edge.count, 0)
+            + node.blueprint.relationshipOutgoing.reduce((total, edge) => total + edge.count, 0);
+          const tierLabel = hierarchyTierLabel(node.blueprint.hierarchyLevel);
 
           return (
             <g key={node.blueprint.company.id} transform={`translate(${node.x} ${node.y})`}>
@@ -556,7 +652,7 @@ function CompanyGraphCanvas({
                 {node.blueprint.company.issuePrefix}
               </text>
               <text x={node.width - 18} y="31" textAnchor="end" fill="rgba(203,213,225,0.78)" fontSize="10" fontWeight="700">
-                {removableLabel}
+                {tierLabel}
               </text>
               {labelLines.map((line, index) => (
                 <text
@@ -596,10 +692,11 @@ function CompanyGraphCanvas({
 export function FullStructurePage() {
   const pageRef = useRef<HTMLDivElement | null>(null);
   const location = useLocation();
-  const { companies, loading } = useCompany();
+  const { companyPrefix } = useParams<{ companyPrefix?: string }>();
+  const { companies, loading, selectedCompany } = useCompany();
   const { setBreadcrumbs } = useBreadcrumbs();
   const [companyFilter, setCompanyFilter] = useState("all");
-  const [layerFilter, setLayerFilter] = useState<LayerFilter>("all");
+  const [tierFilter, setTierFilter] = useState<TierFilter>("all");
   const [relationshipFilter, setRelationshipFilter] = useState("all");
   const [searchValue, setSearchValue] = useState("");
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -615,13 +712,13 @@ export function FullStructurePage() {
     [companies],
   );
 
-  const graphSeedCompany = useMemo(
-    () =>
-      activeCompanies.find((company) => !isTrustOrganization(company))
-      ?? activeCompanies[0]
-      ?? null,
-    [activeCompanies],
-  );
+  const routeCompany = useMemo(() => {
+    if (!companyPrefix) return null;
+    const normalizedPrefix = companyPrefix.toUpperCase();
+    return activeCompanies.find((company) => company.issuePrefix.toUpperCase() === normalizedPrefix) ?? null;
+  }, [activeCompanies, companyPrefix]);
+
+  const graphSeedCompany = routeCompany ?? selectedCompany ?? activeCompanies[0] ?? null;
 
   const enterpriseGraphQuery = useQuery({
     queryKey: graphSeedCompany
@@ -655,8 +752,25 @@ export function FullStructurePage() {
 
   const graphNodes = enterpriseGraphQuery.data?.nodes ?? [];
   const graphLinks = enterpriseGraphQuery.data?.links ?? [];
+  const graphRoots = enterpriseGraphQuery.data?.roots ?? [];
   const workflowPacks = enterpriseGraphQuery.data?.workflowPacks ?? [];
-  const relationshipCategories = useMemo(() => relationshipSummary(graphLinks), [graphLinks]);
+  const hierarchyCompanyEdges = useMemo(
+    () => collectCompanyHierarchyEdges(graphRoots),
+    [graphRoots],
+  );
+  const relationshipCompanyEdges = useMemo(
+    () => collectCompanyRelationshipEdges(graphLinks),
+    [graphLinks],
+  );
+  const companyWireEdges = useMemo(
+    () => [...hierarchyCompanyEdges, ...relationshipCompanyEdges],
+    [hierarchyCompanyEdges, relationshipCompanyEdges],
+  );
+  const hierarchyLevels = useMemo(
+    () => buildCompanyHierarchyLevels(activeCompanies, hierarchyCompanyEdges),
+    [activeCompanies, hierarchyCompanyEdges],
+  );
+  const relationshipCategories = useMemo(() => relationshipSummary(companyWireEdges), [companyWireEdges]);
 
   const blueprints = useMemo(() => {
     return activeCompanies
@@ -664,25 +778,27 @@ export function FullStructurePage() {
         const agents = graphNodes.filter((agent) => agent.companyId === company.id);
         return {
           company,
-          layer: classifyCompany(company),
+          hierarchyLevel: hierarchyLevels.get(company.id) ?? 0,
           agents,
-          incoming: graphLinks.filter((link) => link.targetCompanyId === company.id),
-          outgoing: graphLinks.filter((link) => link.sourceCompanyId === company.id),
+          hierarchyIncoming: hierarchyCompanyEdges.filter((link) => link.targetCompanyId === company.id),
+          hierarchyOutgoing: hierarchyCompanyEdges.filter((link) => link.sourceCompanyId === company.id),
+          relationshipIncoming: relationshipCompanyEdges.filter((link) => link.targetCompanyId === company.id),
+          relationshipOutgoing: relationshipCompanyEdges.filter((link) => link.sourceCompanyId === company.id),
           services: deriveServices(agents),
         };
       })
-      .sort(layerSort);
-  }, [activeCompanies, graphLinks, graphNodes]);
+      .sort(blueprintSort);
+  }, [activeCompanies, graphNodes, hierarchyCompanyEdges, hierarchyLevels, relationshipCompanyEdges]);
 
   const filteredBlueprints = useMemo(() => {
     return blueprints.filter((blueprint) => {
       if (companyFilter !== "all" && blueprint.company.id !== companyFilter) return false;
-      if (layerFilter !== "all" && blueprint.layer !== layerFilter) return false;
+      if (tierFilter !== "all" && blueprint.hierarchyLevel !== Number(tierFilter)) return false;
       if (!matchesBlueprintSearch(blueprint, searchTerm)) return false;
       if (relationshipFilter !== "all" && !hasRelationshipCategory(blueprint, relationshipFilter)) return false;
       return true;
     });
-  }, [blueprints, companyFilter, layerFilter, relationshipFilter, searchTerm]);
+  }, [blueprints, companyFilter, relationshipFilter, searchTerm, tierFilter]);
 
   const visibleCompanyIds = useMemo(
     () => new Set(filteredBlueprints.map((blueprint) => blueprint.company.id)),
@@ -690,11 +806,11 @@ export function FullStructurePage() {
   );
 
   const visibleGraphLinks = useMemo(() => {
-    return graphLinks.filter((link) => {
+    return companyWireEdges.filter((link) => {
       if (!visibleCompanyIds.has(link.sourceCompanyId) || !visibleCompanyIds.has(link.targetCompanyId)) return false;
       return relationshipFilter === "all" || link.category === relationshipFilter;
     });
-  }, [graphLinks, relationshipFilter, visibleCompanyIds]);
+  }, [companyWireEdges, relationshipFilter, visibleCompanyIds]);
 
   const graphLayout = useMemo(
     () => buildGraphLayout(
@@ -705,25 +821,30 @@ export function FullStructurePage() {
     [filteredBlueprints, isFullscreen, viewportWidth, visibleGraphLinks],
   );
 
-  const blueprintsByLayer = useMemo(() => {
-    const grouped: Record<CorporateLayer, CompanyBlueprint[]> = {
-      holding: [],
-      organization: [],
-    };
+  const availableTiers = useMemo(
+    () => Array.from(new Set(blueprints.map((blueprint) => blueprint.hierarchyLevel))).sort((left, right) => left - right),
+    [blueprints],
+  );
 
-    for (const blueprint of filteredBlueprints) {
-      grouped[blueprint.layer].push(blueprint);
-    }
-
-    return grouped;
-  }, [filteredBlueprints]);
+  const blueprintsByTier = useMemo(() => {
+    return availableTiers.map((tier) => ({
+      tier,
+      blueprints: filteredBlueprints.filter((blueprint) => blueprint.hierarchyLevel === tier),
+    }));
+  }, [availableTiers, filteredBlueprints]);
 
   const activeFilterCount = [
     companyFilter !== "all",
-    layerFilter !== "all",
+    tierFilter !== "all",
     relationshipFilter !== "all",
     searchValue.trim().length > 0,
   ].filter(Boolean).length;
+  const totalHierarchyLinks = hierarchyCompanyEdges.reduce((total, edge) => total + edge.count, 0);
+  const totalRelationshipLinks = relationshipCompanyEdges.reduce((total, edge) => total + edge.count, 0);
+  const totalVisibleLinks = visibleGraphLinks.reduce((total, edge) => total + edge.count, 0);
+  const seedLabel = graphSeedCompany
+    ? `${graphSeedCompany.issuePrefix} / ${graphSeedCompany.name}`
+    : "No route seed";
 
   const backTo =
     typeof (location.state as { backTo?: string } | null)?.backTo === "string"
@@ -732,7 +853,7 @@ export function FullStructurePage() {
 
   function resetFilters() {
     setCompanyFilter("all");
-    setLayerFilter("all");
+    setTierFilter("all");
     setRelationshipFilter("all");
     setSearchValue("");
   }
@@ -794,18 +915,18 @@ export function FullStructurePage() {
                   Full Corporation Structure
                 </h1>
                 <p className="mt-4 max-w-2xl text-sm leading-6 text-white/72 md:text-base">
-                  A browser-wide live graph for the whole corporation. It is not rooted in Trust,
-                  FAM, or any removable org; every company is simply one organization inside the map.
+                  A browser-wide live graph for the whole corporation, seeded from the active
+                  company route and drawn from real reports-to hierarchy plus inter-company links.
                 </p>
                 <p className="mt-3 text-xs text-white/54">
-                  Auto-refreshes every 15 seconds and keeps filters independent from selected org routes.
+                  Route seed: {seedLabel}. Auto-refreshes every 15 seconds.
                 </p>
               </div>
 
               <div className="grid gap-3 sm:grid-cols-3 lg:w-[34rem]">
                 <StructureStat icon={Building2} label="Organizations" value={activeCompanies.length} detail="entities inside the feature" />
                 <StructureStat icon={Users} label="Agents" value={graphNodes.length} detail="visible workforce nodes" />
-                <StructureStat icon={Network} label="Links" value={graphLinks.length} detail="enterprise wiring points" />
+                <StructureStat icon={Network} label="Wiring" value={totalHierarchyLinks + totalRelationshipLinks} detail={`${totalHierarchyLinks} hierarchy / ${totalRelationshipLinks} enterprise`} />
               </div>
             </div>
           </header>
@@ -830,7 +951,7 @@ export function FullStructurePage() {
                     </span>
                   </div>
                   <h2 className="truncate text-lg font-semibold tracking-tight text-white md:text-xl">
-                    Global corporation graph
+                    Route-seeded corporation graph
                   </h2>
                 </div>
               </div>
@@ -845,10 +966,13 @@ export function FullStructurePage() {
                   ))}
                 </FilterSelect>
 
-                <FilterSelect label="Layer" value={layerFilter} onChange={(value) => setLayerFilter(value as LayerFilter)}>
-                  <option value="all">All layers</option>
-                  <option value="holding">Capital / holding</option>
-                  <option value="organization">Organizations</option>
+                <FilterSelect label="Tier" value={tierFilter} onChange={setTierFilter}>
+                  <option value="all">All hierarchy tiers</option>
+                  {availableTiers.map((tier) => (
+                    <option key={tier} value={String(tier)}>
+                      {hierarchyTierLabel(tier)}
+                    </option>
+                  ))}
                 </FilterSelect>
 
                 <FilterSelect label="Relationship" value={relationshipFilter} onChange={setRelationshipFilter}>
@@ -911,10 +1035,10 @@ export function FullStructurePage() {
                 Showing {filteredBlueprints.length} of {activeCompanies.length} organizations
               </span>
               <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
-                {visibleGraphLinks.length} visible relationship links
+                {totalVisibleLinks} visible hierarchy and enterprise links
               </span>
               <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
-                Trust/FAM is an organization, not the root
+                Seeded by {seedLabel}
               </span>
             </div>
           </div>
@@ -949,38 +1073,39 @@ export function FullStructurePage() {
               </div>
 
               <div className="space-y-4">
-                {layerOrder.map((layer) => {
-                  const layerBlueprints = blueprintsByLayer[layer];
+                {blueprintsByTier.map(({ tier, blueprints: tierBlueprints }) => {
                   return (
                     <div
-                      key={layer}
+                      key={tier}
                       className="relative rounded-[1.5rem] border border-border/70 bg-muted/24 p-4"
                     >
                       <div className="mb-3 flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
                         <div>
                           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                             <GitBranch className="h-3.5 w-3.5" />
-                            {layerCopy[layer].eyebrow}
+                            {hierarchyTierLabel(tier)}
                           </div>
-                          <h3 className="mt-1 text-base font-semibold text-foreground">{layerCopy[layer].title}</h3>
+                          <h3 className="mt-1 text-base font-semibold text-foreground">
+                            Route-derived hierarchy tier
+                          </h3>
                         </div>
                         <p className="max-w-xl text-xs leading-5 text-muted-foreground">
-                          {layerCopy[layer].description}
+                          {hierarchyTierDescription(tier)}
                         </p>
                       </div>
 
-                      {layerBlueprints.length > 0 ? (
+                      {tierBlueprints.length > 0 ? (
                         <div className={cn(
                           "grid gap-3",
-                          layer === "organization" ? "md:grid-cols-2 2xl:grid-cols-3" : "md:grid-cols-2",
+                          "md:grid-cols-2 2xl:grid-cols-3",
                         )}>
-                          {layerBlueprints.map((blueprint) => (
+                          {tierBlueprints.map((blueprint) => (
                             <CompanyVisionCard key={blueprint.company.id} blueprint={blueprint} />
                           ))}
                         </div>
                       ) : (
                         <div className="rounded-2xl border border-dashed border-border bg-background/70 p-4 text-sm text-muted-foreground">
-                          No companies in this layer match the current filters.
+                          No companies in this hierarchy tier match the current filters.
                         </div>
                       )}
                     </div>
