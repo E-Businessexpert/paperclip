@@ -178,20 +178,21 @@ export function agentRoutes(db: Db) {
 
   async function buildAgentDetail(
     agent: NonNullable<Awaited<ReturnType<typeof svc.getById>>>,
-    options?: { restricted?: boolean },
+    options?: { restricted?: boolean; includeEnterpriseRelationships?: boolean },
   ) {
+    const includeEnterpriseRelationships = !options?.restricted || options?.includeEnterpriseRelationships;
     const [chainOfCommand, accessState, enterpriseRelationships] = await Promise.all([
       svc.getChainOfCommand(agent.id),
       buildAgentAccessState(agent),
-      options?.restricted
-        ? Promise.resolve({
+      includeEnterpriseRelationships
+        ? svc.getEnterpriseRelationshipsView(agent.id)
+        : Promise.resolve({
           version: 1 as const,
           updatedAt: null,
           customTypes: [],
           availableTypes: [],
           links: [],
-        })
-        : svc.getEnterpriseRelationshipsView(agent.id),
+        }),
     ]);
 
     return {
@@ -245,16 +246,46 @@ export function agentRoutes(db: Db) {
   }
 
   async function actorCanReadConfigurationsForCompany(req: Request, companyId: string) {
+    const scopes = await getActorReadScopesForCompany(req, companyId);
+    return scopes.canReadConfigurations;
+  }
+
+  async function getActorReadScopesForCompany(req: Request, companyId: string) {
     assertCompanyAccess(req, companyId);
     if (req.actor.type === "board") {
-      if (req.actor.source === "local_implicit" || req.actor.isInstanceAdmin) return true;
-      return access.canUser(companyId, req.actor.userId, "agents:create");
+      if (req.actor.source === "local_implicit" || req.actor.isInstanceAdmin) {
+        return {
+          canReadConfigurations: true,
+          canReadEnterpriseRelationships: true,
+        };
+      }
+      const canReadConfigurations = await access.canUser(companyId, req.actor.userId, "agents:create");
+      return {
+        canReadConfigurations,
+        canReadEnterpriseRelationships: canReadConfigurations,
+      };
     }
-    if (!req.actor.agentId) return false;
+    if (!req.actor.agentId) {
+      return {
+        canReadConfigurations: false,
+        canReadEnterpriseRelationships: false,
+      };
+    }
     const actorAgent = await svc.getById(req.actor.agentId);
-    if (!actorAgent || actorAgent.companyId !== companyId) return false;
+    if (!actorAgent || actorAgent.companyId !== companyId) {
+      return {
+        canReadConfigurations: false,
+        canReadEnterpriseRelationships: false,
+      };
+    }
     const allowedByGrant = await access.hasPermission(companyId, "agent", actorAgent.id, "agents:create");
-    return allowedByGrant || canCreateAgents(actorAgent);
+    const canReadConfigurations = allowedByGrant || canCreateAgents(actorAgent);
+    return {
+      canReadConfigurations,
+      canReadEnterpriseRelationships: canReadConfigurations
+        || hasAgentPermissionFlag(actorAgent, "canDesignOrganizations")
+        || hasAgentPermissionFlag(actorAgent, "canManageRelationshipTypes"),
+    };
   }
 
   function getVisibleCompanyIds(req: Request): string[] | null {
@@ -1322,9 +1353,12 @@ export function agentRoutes(db: Db) {
     }
     assertCompanyAccess(req, agent.companyId);
     if (req.actor.type === "agent" && req.actor.agentId !== id) {
-      const canRead = await actorCanReadConfigurationsForCompany(req, agent.companyId);
-      if (!canRead) {
-        res.json(await buildAgentDetail(agent, { restricted: true }));
+      const readScopes = await getActorReadScopesForCompany(req, agent.companyId);
+      if (!readScopes.canReadConfigurations) {
+        res.json(await buildAgentDetail(agent, {
+          restricted: true,
+          includeEnterpriseRelationships: readScopes.canReadEnterpriseRelationships,
+        }));
         return;
       }
     }

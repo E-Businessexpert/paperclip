@@ -236,6 +236,31 @@ function getDisabledAdapterTypesFromStore(): string[] {
 }
 
 /**
+ * Merge an external adapter module with host-provided session management.
+ *
+ * Module-provided `sessionManagement` takes precedence. When absent, fall
+ * back to the hardcoded registry keyed by adapter type (so externals that
+ * override a built-in — same `type` — inherit the builtin's policy). If
+ * neither is available, `sessionManagement` remains `undefined`.
+ *
+ * Used by both the init-time IIFE below (external-adapter load pass on
+ * server start) and the hot-install path in `routes/adapters.ts`
+ * (`registerWithSessionManagement`), so the two load paths resolve
+ * `sessionManagement` identically.
+ */
+export function resolveExternalAdapterRegistration(
+  externalAdapter: ServerAdapterModule,
+): ServerAdapterModule {
+  return {
+    ...externalAdapter,
+    sessionManagement:
+      externalAdapter.sessionManagement
+        ?? getAdapterSessionManagement(externalAdapter.type)
+        ?? undefined,
+  };
+}
+
+/**
  * Load external adapters from the plugin store and hardcoded sources.
  * Called once at module initialization. The promise is exported so that
  * callers (e.g. assertKnownAdapterType, app startup) can await completion
@@ -258,10 +283,7 @@ const externalAdaptersReady: Promise<void> = (async () => {
       }
       adaptersByType.set(
         externalAdapter.type,
-        {
-          ...externalAdapter,
-          sessionManagement: getAdapterSessionManagement(externalAdapter.type) ?? undefined,
-        },
+        resolveExternalAdapterRegistration(externalAdapter),
       );
     }
   } catch (err) {

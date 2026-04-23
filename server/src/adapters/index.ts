@@ -6,6 +6,7 @@ export {
   findActiveServerAdapter,
   detectAdapterModel,
   registerServerAdapter,
+  resolveExternalAdapterRegistration,
   unregisterServerAdapter,
   requireServerAdapter,
 } from "./registry.js";

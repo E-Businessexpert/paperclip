@@ -28,7 +28,7 @@ const overridingConfigSchemaAdapter: ServerAdapterModule = {
   }),
 };
 
-function createApp() {
+function createApp(actorOverrides: Record<string, unknown> = {}) {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
@@ -38,6 +38,8 @@ function createApp() {
       companyIds: [],
       source: "local_implicit",
       isInstanceAdmin: false,
+      memberships: [],
+      ...actorOverrides,
     };
     next();
   });
@@ -74,5 +76,35 @@ describe("adapter routes", () => {
     const builtin = await request(app).get("/api/adapters/claude_local/config-schema");
     expect(builtin.status, JSON.stringify(builtin.body)).toBe(404);
     expect(String(builtin.body.error ?? "")).toContain("does not provide a config schema");
+  });
+
+  it("allows a non-admin board member with company access to read config schema metadata", async () => {
+    const app = createApp({
+      source: "session",
+      companyIds: ["company-1"],
+      isInstanceAdmin: false,
+    });
+
+    const res = await request(app).get("/api/adapters/claude_local/config-schema");
+
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({
+      fields: [{ key: "mode" }],
+    });
+  });
+
+  it("rejects adapter mutation routes for non-admin board members", async () => {
+    const app = createApp({
+      source: "session",
+      companyIds: ["company-1"],
+      isInstanceAdmin: false,
+    });
+
+    const res = await request(app)
+      .patch("/api/adapters/claude_local/override")
+      .send({ paused: true });
+
+    expect(res.status).toBe(403);
+    expect(String(res.body.error ?? "")).toContain("Instance admin access required");
   });
 });

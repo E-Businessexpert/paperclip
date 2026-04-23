@@ -9,6 +9,11 @@ declare global {
         agentId?: string;
         companyId?: string;
         companyIds?: string[];
+        memberships?: Array<{
+          companyId: string;
+          status: string;
+          membershipRole: string | null;
+        }>;
         isInstanceAdmin?: boolean;
         keyId?: string;
         runId?: string;

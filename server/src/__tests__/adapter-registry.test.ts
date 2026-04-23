@@ -7,6 +7,7 @@ import {
   listAdapterModels,
   registerServerAdapter,
   requireServerAdapter,
+  resolveExternalAdapterRegistration,
   unregisterServerAdapter,
 } from "../adapters/index.js";
 import { setOverridePaused } from "../adapters/registry.js";
@@ -139,5 +140,38 @@ describe("server adapter registry", () => {
     expect(await listAdapterModels("claude_local")).toEqual(builtIn?.models ?? []);
     expect(await detectAdapterModel("claude_local")).toBeNull();
     expect(detectModel).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves module-provided session management when resolving external adapter registration", () => {
+    const adapter: ServerAdapterModule = {
+      ...externalAdapter,
+      type: "session_external",
+      sessionManagement: {
+        supportsSessionResume: true,
+        nativeContextManagement: "confirmed",
+        defaultSessionCompaction: {
+          enabled: true,
+          maxSessionRuns: 5,
+          maxRawInputTokens: 10_000,
+          maxSessionAgeHours: 24,
+        },
+      },
+    };
+
+    const resolved = resolveExternalAdapterRegistration(adapter);
+
+    expect(resolved.sessionManagement).toEqual(adapter.sessionManagement);
+  });
+
+  it("falls back to builtin session management when an override omits it", () => {
+    const resolved = resolveExternalAdapterRegistration({
+      ...externalAdapter,
+      type: "claude_local",
+      sessionManagement: undefined,
+    });
+
+    expect(resolved.sessionManagement).toMatchObject({
+      supportsSessionResume: true,
+    });
   });
 });

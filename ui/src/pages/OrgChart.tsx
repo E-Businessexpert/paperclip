@@ -70,6 +70,18 @@ const ALL_COMPANIES_FILTER = "__all_companies__";
 type OrgViewMode = "hierarchy" | "enterprise";
 type EnterpriseGraphScopeMode = "company" | "family";
 type RelationshipDirectionFilter = "both" | "downstream" | "upstream";
+type EnterpriseLevelFilter = "all" | "0" | "1" | "2" | "3plus";
+type EnterpriseRootFilter = "all" | "rootsOnly" | "nonRoots";
+type EnterprisePermissionFilter = "all" | "any" | InspectorPermissionKey;
+type EnterpriseMetadataFilter =
+  | "all"
+  | "any"
+  | "none"
+  | "serviceDiscovery"
+  | "enterpriseRelationships";
+type EnterpriseArchivedFilter = "all" | "excludeArchivedCompanies" | "onlyArchivedCompanies";
+type EnterpriseErrorFilter = "all" | "onlyErrors" | "excludeErrors";
+type EnterpriseCrossCompanyFilter = "all" | "onlyCrossCompany" | "internalOnly";
 
 interface OrgChartProps {
   fullscreen?: boolean;
@@ -121,6 +133,16 @@ type InspectorPermissionKey =
   | "canGenerateSystemTopology";
 
 type InspectorItemKey = `permission:${InspectorPermissionKey}` | `action:${string}`;
+
+const FILTERABLE_PERMISSION_KEYS: readonly InspectorPermissionKey[] = [
+  "canCreateAgents",
+  "canAssignTasks",
+  "canDesignOrganizations",
+  "canManageRelationshipTypes",
+  "canManageServiceDiscovery",
+  "canManageDeploymentAssignments",
+  "canGenerateSystemTopology",
+] as const;
 
 type GraphFocusTarget =
   | { kind: "agent"; id: string }
@@ -359,6 +381,40 @@ const statusDotColor: Record<string, string> = {
 const defaultDotColor = "#a3a3a3";
 const roleLabels: Record<string, string> = AGENT_ROLE_LABELS;
 const hierarchyFocusStroke = "#38bdf8";
+const levelFilterLabels: Record<EnterpriseLevelFilter, string> = {
+  all: "Any level",
+  "0": "Level 0",
+  "1": "Level 1",
+  "2": "Level 2",
+  "3plus": "Level 3+",
+};
+const rootFilterLabels: Record<EnterpriseRootFilter, string> = {
+  all: "All nodes",
+  rootsOnly: "Roots only",
+  nonRoots: "Non-roots",
+};
+const metadataFilterLabels: Record<EnterpriseMetadataFilter, string> = {
+  all: "Any metadata",
+  any: "Has metadata",
+  none: "No metadata",
+  serviceDiscovery: "Service discovery",
+  enterpriseRelationships: "Enterprise relationships",
+};
+const archivedFilterLabels: Record<EnterpriseArchivedFilter, string> = {
+  all: "Any company state",
+  excludeArchivedCompanies: "Hide archived companies",
+  onlyArchivedCompanies: "Archived companies only",
+};
+const errorFilterLabels: Record<EnterpriseErrorFilter, string> = {
+  all: "Any error state",
+  onlyErrors: "Errors only",
+  excludeErrors: "Hide errors",
+};
+const crossCompanyFilterLabels: Record<EnterpriseCrossCompanyFilter, string> = {
+  all: "Any link scope",
+  onlyCrossCompany: "Cross-company only",
+  internalOnly: "Internal only",
+};
 
 const inspectorPermissionDescriptors: readonly PermissionDescriptor[] = [
   {
@@ -699,7 +755,7 @@ function sanitizeMarkerId(value: string) {
 }
 
 function permissionFlag(
-  permissions: Record<string, boolean | undefined> | undefined,
+  permissions: Partial<Record<InspectorPermissionKey, boolean>> | undefined,
   key: InspectorPermissionKey,
 ) {
   return Boolean(permissions?.[key]);
@@ -711,6 +767,39 @@ function permissionMatchesLink(descriptor: PermissionDescriptor, link: Enterpris
   }
 
   return descriptor.categories.includes(link.category);
+}
+
+function hasAnyMetadata(metadata: AgentDirectoryEntry["metadata"] | null | undefined) {
+  return Boolean(metadata && Object.keys(metadata).length > 0);
+}
+
+function matchesLevelFilter(depth: number, filter: EnterpriseLevelFilter) {
+  if (filter === "all") return true;
+  if (filter === "3plus") return depth >= 3;
+  return depth === Number(filter);
+}
+
+function matchesPermissionFilter(
+  permissions: AgentDirectoryEntry["permissions"] | undefined,
+  filter: EnterprisePermissionFilter,
+) {
+  if (filter === "all") return true;
+  if (filter === "any") {
+    return FILTERABLE_PERMISSION_KEYS.some((key) => permissionFlag(permissions, key));
+  }
+  return permissionFlag(permissions, filter);
+}
+
+function matchesMetadataFilter(
+  metadata: AgentDirectoryEntry["metadata"] | null | undefined,
+  filter: EnterpriseMetadataFilter,
+) {
+  if (filter === "all") return true;
+  if (filter === "any") return hasAnyMetadata(metadata);
+  if (filter === "none") return !hasAnyMetadata(metadata);
+  if (filter === "serviceDiscovery") return Boolean(metadata?.serviceDiscoveryCache);
+  if (filter === "enterpriseRelationships") return Boolean(metadata?.enterpriseRelationships);
+  return true;
 }
 
 function hashString(value: string): number {
@@ -820,6 +909,18 @@ export function OrgChart({
     useState<RelationshipDirectionFilter>("both");
   const [companyAFilter, setCompanyAFilter] = useState<string>(ALL_COMPANIES_FILTER);
   const [companyBFilter, setCompanyBFilter] = useState<string>(ALL_COMPANIES_FILTER);
+  const [levelFilter, setLevelFilter] = useState<EnterpriseLevelFilter>("all");
+  const [rootFilter, setRootFilter] = useState<EnterpriseRootFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<EnterpriseGraphNode["status"] | "all">("all");
+  const [roleFilter, setRoleFilter] = useState<EnterpriseGraphNode["role"] | "all">("all");
+  const [adapterFilter, setAdapterFilter] =
+    useState<AgentDirectoryEntry["adapterType"] | "all">("all");
+  const [permissionFilter, setPermissionFilter] = useState<EnterprisePermissionFilter>("all");
+  const [metadataFilter, setMetadataFilter] = useState<EnterpriseMetadataFilter>("all");
+  const [archivedFilter, setArchivedFilter] = useState<EnterpriseArchivedFilter>("all");
+  const [errorFilter, setErrorFilter] = useState<EnterpriseErrorFilter>("all");
+  const [crossCompanyFilter, setCrossCompanyFilter] =
+    useState<EnterpriseCrossCompanyFilter>("all");
   const [wiringVisibility, setWiringVisibility] = useState<WiringVisibilityState>(() =>
     createDefaultWiringVisibility(enterpriseScope, initialStoredViewMode),
   );
@@ -900,6 +1001,16 @@ export function OrgChart({
     setRelationshipDirectionFilter("both");
     setCompanyAFilter(ALL_COMPANIES_FILTER);
     setCompanyBFilter(ALL_COMPANIES_FILTER);
+    setLevelFilter("all");
+    setRootFilter("all");
+    setStatusFilter("all");
+    setRoleFilter("all");
+    setAdapterFilter("all");
+    setPermissionFilter("all");
+    setMetadataFilter("all");
+    setArchivedFilter("all");
+    setErrorFilter("all");
+    setCrossCompanyFilter("all");
     setWiringVisibility(createDefaultWiringVisibility(enterpriseScope, effectiveViewMode));
     setFiltersOpen(effectiveViewMode === "enterprise");
     setInspectorMinimized(false);
@@ -987,6 +1098,31 @@ export function OrgChart({
 
     return options.sort((left, right) => left.name.localeCompare(right.name));
   }, [companies, enterpriseGraph]);
+  const companyStatusById = useMemo(
+    () => new Map(companies.map((company) => [company.id, company.status])),
+    [companies],
+  );
+  const statusOptions = useMemo(
+    () =>
+      Array.from(new Set(inspectorAgents.map((agent) => agent.status))).sort((left, right) =>
+        left.localeCompare(right),
+      ),
+    [inspectorAgents],
+  );
+  const roleOptions = useMemo(
+    () =>
+      Array.from(new Set(inspectorAgents.map((agent) => agent.role))).sort((left, right) =>
+        roleLabel(left).localeCompare(roleLabel(right)),
+      ),
+    [inspectorAgents],
+  );
+  const adapterOptions = useMemo(
+    () =>
+      Array.from(new Set(inspectorAgents.map((agent) => agent.adapterType))).sort((left, right) =>
+        getAdapterLabel(left).localeCompare(getAdapterLabel(right)),
+      ),
+    [inspectorAgents],
+  );
 
   useEffect(() => {
     if (
@@ -1003,6 +1139,18 @@ export function OrgChart({
       setCompanyBFilter(ALL_COMPANIES_FILTER);
     }
   }, [companyAFilter, companyBFilter, companyOptions]);
+
+  useEffect(() => {
+    if (statusFilter !== "all" && !statusOptions.includes(statusFilter)) {
+      setStatusFilter("all");
+    }
+    if (roleFilter !== "all" && !roleOptions.includes(roleFilter)) {
+      setRoleFilter("all");
+    }
+    if (adapterFilter !== "all" && !adapterOptions.includes(adapterFilter)) {
+      setAdapterFilter("all");
+    }
+  }, [adapterFilter, adapterOptions, roleFilter, roleOptions, statusFilter, statusOptions]);
 
   const rawRoots = useMemo(
     () =>
@@ -1032,6 +1180,7 @@ export function OrgChart({
     () => rawRoots.map((root) => applyCollapsedReports(root, collapsedNodeIds)),
     [collapsedNodeIds, rawRoots],
   );
+  const rootNodeIds = useMemo(() => new Set(rawRoots.map((root) => root.id)), [rawRoots]);
 
   const relationshipCategories = useMemo(() => {
     const categories = new Set<EnterpriseRelationshipCategory>();
@@ -1116,6 +1265,29 @@ export function OrgChart({
           ),
     [effectiveViewMode, hierarchyEdges, matchesCompanyFilter],
   );
+  const crossCompanyNodeIds = useMemo(() => {
+    const nodeIds = new Set<string>();
+
+    for (const edge of hierarchyEdges) {
+      if (!edge.crossCompany) continue;
+      nodeIds.add(edge.parent.id);
+      nodeIds.add(edge.child.id);
+    }
+
+    for (const link of categoryFilteredRelationshipLinks) {
+      if (
+        !link.sourceCompanyId ||
+        !link.targetCompanyId ||
+        link.sourceCompanyId === link.targetCompanyId
+      ) {
+        continue;
+      }
+      nodeIds.add(link.sourceAgentId);
+      nodeIds.add(link.targetAgentId);
+    }
+
+    return nodeIds;
+  }, [categoryFilteredRelationshipLinks, hierarchyEdges]);
   const layoutNodeMap = useMemo(() => new Map(allNodes.map((node) => [node.id, node])), [allNodes]);
   const companyGroups = useMemo(
     () =>
@@ -1130,40 +1302,138 @@ export function OrgChart({
   );
   const companyScopedFilterActive =
     companyAFilter !== ALL_COMPANIES_FILTER || companyBFilter !== ALL_COMPANIES_FILTER;
-
-  const highlightedNodeIds = useMemo(() => {
-    if (!companyScopedFilterActive) return new Set<string>();
+  const advancedFilterActive =
+    levelFilter !== "all" ||
+    rootFilter !== "all" ||
+    statusFilter !== "all" ||
+    roleFilter !== "all" ||
+    adapterFilter !== "all" ||
+    permissionFilter !== "all" ||
+    metadataFilter !== "all" ||
+    archivedFilter !== "all" ||
+    errorFilter !== "all" ||
+    crossCompanyFilter !== "all";
+  const enterpriseNodeFilterActive = companyScopedFilterActive || advancedFilterActive;
+  const advancedMatchingNodeIds = useMemo(() => {
+    if (!advancedFilterActive) return new Set<string>();
 
     const nodeIds = new Set<string>();
-    filteredRelationshipLinks.forEach((link) => {
-      nodeIds.add(link.sourceAgentId);
-      nodeIds.add(link.targetAgentId);
-    });
-    filteredHierarchyEdges.forEach(({ parent, child }) => {
-      nodeIds.add(parent.id);
-      nodeIds.add(child.id);
-    });
-    allNodes.forEach((node) => {
+
+    for (const node of allNodes) {
+      const agent = mergedAgentMap.get(node.id);
+      const companyStatus = node.companyId ? companyStatusById.get(node.companyId) ?? null : null;
+      const rootMatches =
+        rootFilter === "all"
+          ? true
+          : rootFilter === "rootsOnly"
+            ? rootNodeIds.has(node.id)
+            : !rootNodeIds.has(node.id);
+      const statusMatches = statusFilter === "all" ? true : node.status === statusFilter;
+      const roleMatches = roleFilter === "all" ? true : node.role === roleFilter;
+      const adapterMatches =
+        adapterFilter === "all" ? true : agent?.adapterType === adapterFilter;
+      const archivedMatches =
+        archivedFilter === "all"
+          ? true
+          : archivedFilter === "onlyArchivedCompanies"
+            ? companyStatus === "archived"
+            : companyStatus !== "archived";
+      const errorMatches =
+        errorFilter === "all"
+          ? true
+          : errorFilter === "onlyErrors"
+            ? node.status === "error"
+            : node.status !== "error";
+      const crossCompanyMatches =
+        crossCompanyFilter === "all"
+          ? true
+          : crossCompanyFilter === "onlyCrossCompany"
+            ? crossCompanyNodeIds.has(node.id)
+            : !crossCompanyNodeIds.has(node.id);
+
       if (
-        (companyAFilter !== ALL_COMPANIES_FILTER && node.companyId === companyAFilter) ||
-        (companyBFilter !== ALL_COMPANIES_FILTER && node.companyId === companyBFilter)
+        matchesLevelFilter(node.depth, levelFilter) &&
+        rootMatches &&
+        statusMatches &&
+        roleMatches &&
+        adapterMatches &&
+        matchesPermissionFilter(agent?.permissions, permissionFilter) &&
+        matchesMetadataFilter(agent?.metadata, metadataFilter) &&
+        archivedMatches &&
+        errorMatches &&
+        crossCompanyMatches
       ) {
         nodeIds.add(node.id);
       }
-    });
+    }
 
     return nodeIds;
   }, [
+    adapterFilter,
+    advancedFilterActive,
+    allNodes,
+    archivedFilter,
+    companyStatusById,
+    crossCompanyFilter,
+    crossCompanyNodeIds,
+    errorFilter,
+    levelFilter,
+    mergedAgentMap,
+    metadataFilter,
+    permissionFilter,
+    roleFilter,
+    rootFilter,
+    rootNodeIds,
+    statusFilter,
+  ]);
+
+  const highlightedNodeIds = useMemo(() => {
+    if (!enterpriseNodeFilterActive) return new Set<string>();
+
+    const nodeIds = companyScopedFilterActive ? new Set<string>() : new Set(allNodes.map((node) => node.id));
+
+    if (companyScopedFilterActive) {
+      filteredRelationshipLinks.forEach((link) => {
+        nodeIds.add(link.sourceAgentId);
+        nodeIds.add(link.targetAgentId);
+      });
+      filteredHierarchyEdges.forEach(({ parent, child }) => {
+        nodeIds.add(parent.id);
+        nodeIds.add(child.id);
+      });
+      allNodes.forEach((node) => {
+        if (
+          (companyAFilter !== ALL_COMPANIES_FILTER && node.companyId === companyAFilter) ||
+          (companyBFilter !== ALL_COMPANIES_FILTER && node.companyId === companyBFilter)
+        ) {
+          nodeIds.add(node.id);
+        }
+      });
+    }
+
+    if (advancedFilterActive) {
+      Array.from(nodeIds).forEach((nodeId) => {
+        if (!advancedMatchingNodeIds.has(nodeId)) {
+          nodeIds.delete(nodeId);
+        }
+      });
+    }
+
+    return nodeIds;
+  }, [
+    advancedFilterActive,
+    advancedMatchingNodeIds,
     allNodes,
     companyAFilter,
     companyBFilter,
     companyScopedFilterActive,
+    enterpriseNodeFilterActive,
     filteredHierarchyEdges,
     filteredRelationshipLinks,
   ]);
 
   const highlightedCompanyKeys = useMemo(() => {
-    if (!companyScopedFilterActive) return new Set<string>();
+    if (!enterpriseNodeFilterActive) return new Set<string>();
 
     const keys = new Set<string>();
     const addCompanyKey = (companyId?: string | null, companyName?: string | null) => {
@@ -1171,13 +1441,10 @@ export function OrgChart({
       keys.add(companyGroupKey(companyId, companyName));
     };
 
-    filteredRelationshipLinks.forEach((link) => {
-      addCompanyKey(link.sourceCompanyId, link.sourceCompanyName);
-      addCompanyKey(link.targetCompanyId, link.targetCompanyName);
-    });
-    filteredHierarchyEdges.forEach(({ parent, child }) => {
-      addCompanyKey(parent.companyId, parent.companyName);
-      addCompanyKey(child.companyId, child.companyName);
+    allNodes.forEach((node) => {
+      if (highlightedNodeIds.has(node.id)) {
+        addCompanyKey(node.companyId, node.companyName);
+      }
     });
 
     if (companyAFilter !== ALL_COMPANIES_FILTER) {
@@ -1191,12 +1458,12 @@ export function OrgChart({
 
     return keys;
   }, [
+    allNodes,
     companyAFilter,
     companyBFilter,
     companyOptions,
-    companyScopedFilterActive,
-    filteredHierarchyEdges,
-    filteredRelationshipLinks,
+    enterpriseNodeFilterActive,
+    highlightedNodeIds,
   ]);
 
   const bounds = useMemo(() => {
@@ -1397,6 +1664,7 @@ export function OrgChart({
       : relationshipDirectionFilter === "upstream"
         ? "Bottom-up"
         : "Two-way";
+  const visibleMatchCount = enterpriseNodeFilterActive ? highlightedNodeIds.size : allNodes.length;
 
   const focusAgents = useMemo(() => {
     if (!focusTarget) return [];
@@ -1840,7 +2108,7 @@ export function OrgChart({
 
   useEffect(() => {
     if (focusTarget) return;
-    if (selectedCompanyGroupKeys.length === 0) return;
+    if (!enterpriseNodeFilterActive) return;
 
     if (wiringVisibility.showAgents) {
       if (highlightedNodeIds.size === 0) return;
@@ -1848,11 +2116,19 @@ export function OrgChart({
       return;
     }
 
-    fitToCompanyGroupKeys(selectedCompanyGroupKeys);
+    const companyKeys =
+      selectedCompanyGroupKeys.length > 0
+        ? selectedCompanyGroupKeys
+        : Array.from(highlightedCompanyKeys);
+    if (companyKeys.length === 0) return;
+
+    fitToCompanyGroupKeys(companyKeys);
   }, [
+    enterpriseNodeFilterActive,
     fitToCompanyGroupKeys,
     fitToNodeIds,
     focusTarget,
+    highlightedCompanyKeys,
     highlightedNodeIds,
     selectedCompanyGroupKeys,
     wiringVisibility.showAgents,
@@ -1960,6 +2236,16 @@ export function OrgChart({
     setRelationshipDirectionFilter("both");
     setCompanyAFilter(ALL_COMPANIES_FILTER);
     setCompanyBFilter(ALL_COMPANIES_FILTER);
+    setLevelFilter("all");
+    setRootFilter("all");
+    setStatusFilter("all");
+    setRoleFilter("all");
+    setAdapterFilter("all");
+    setPermissionFilter("all");
+    setMetadataFilter("all");
+    setArchivedFilter("all");
+    setErrorFilter("all");
+    setCrossCompanyFilter("all");
     setWiringVisibility(createDefaultWiringVisibility(enterpriseScope, effectiveViewMode));
     setSelectedInspectorItem(null);
   }, [effectiveViewMode, enterpriseScope]);
@@ -2414,6 +2700,223 @@ export function OrgChart({
               <div className="rounded-xl border border-border/70 bg-background/55 p-3 dark:border-white/10 dark:bg-slate-950/45">
                 <div className="flex items-center justify-between gap-2">
                   <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                    Agent Filters
+                  </div>
+                  <span className="text-[10px] text-muted-foreground">
+                    {visibleMatchCount} visible
+                  </span>
+                </div>
+
+                <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-1">
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-medium text-foreground/80">Level</div>
+                    <Select
+                      value={levelFilter}
+                      onValueChange={(value) => setLevelFilter(value as EnterpriseLevelFilter)}
+                    >
+                      <SelectTrigger className="w-full justify-between bg-background/80">
+                        <SelectValue placeholder="Choose level" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(levelFilterLabels).map(([value, label]) => (
+                          <SelectItem key={`level:${value}`} value={value}>
+                            {label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-medium text-foreground/80">Roots</div>
+                    <Select
+                      value={rootFilter}
+                      onValueChange={(value) => setRootFilter(value as EnterpriseRootFilter)}
+                    >
+                      <SelectTrigger className="w-full justify-between bg-background/80">
+                        <SelectValue placeholder="Choose root scope" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(rootFilterLabels).map(([value, label]) => (
+                          <SelectItem key={`root:${value}`} value={value}>
+                            {label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-medium text-foreground/80">Status</div>
+                    <Select
+                      value={statusFilter}
+                      onValueChange={(value) =>
+                        setStatusFilter(value as EnterpriseGraphNode["status"] | "all")
+                      }
+                    >
+                      <SelectTrigger className="w-full justify-between bg-background/80">
+                        <SelectValue placeholder="Any status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Any status</SelectItem>
+                        {statusOptions.map((status) => (
+                          <SelectItem key={`status:${status}`} value={status}>
+                            {status}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-medium text-foreground/80">Role</div>
+                    <Select
+                      value={roleFilter}
+                      onValueChange={(value) =>
+                        setRoleFilter(value as EnterpriseGraphNode["role"] | "all")
+                      }
+                    >
+                      <SelectTrigger className="w-full justify-between bg-background/80">
+                        <SelectValue placeholder="Any role" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Any role</SelectItem>
+                        {roleOptions.map((role) => (
+                          <SelectItem key={`role:${role}`} value={role}>
+                            {roleLabel(role)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-medium text-foreground/80">Adapter</div>
+                    <Select value={adapterFilter} onValueChange={setAdapterFilter}>
+                      <SelectTrigger className="w-full justify-between bg-background/80">
+                        <SelectValue placeholder="Any adapter" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Any adapter</SelectItem>
+                        {adapterOptions.map((adapter) => (
+                          <SelectItem key={`adapter:${adapter}`} value={adapter}>
+                            {getAdapterLabel(adapter)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-medium text-foreground/80">Permissions</div>
+                    <Select
+                      value={permissionFilter}
+                      onValueChange={(value) =>
+                        setPermissionFilter(value as EnterprisePermissionFilter)
+                      }
+                    >
+                      <SelectTrigger className="w-full justify-between bg-background/80">
+                        <SelectValue placeholder="Any permissions" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Any permissions</SelectItem>
+                        <SelectItem value="any">Any elevated permission</SelectItem>
+                        {inspectorPermissionDescriptors.map((descriptor) => (
+                          <SelectItem key={`permission:${descriptor.key}`} value={descriptor.key}>
+                            {descriptor.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-medium text-foreground/80">Metadata</div>
+                    <Select
+                      value={metadataFilter}
+                      onValueChange={(value) =>
+                        setMetadataFilter(value as EnterpriseMetadataFilter)
+                      }
+                    >
+                      <SelectTrigger className="w-full justify-between bg-background/80">
+                        <SelectValue placeholder="Any metadata" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(metadataFilterLabels).map(([value, label]) => (
+                          <SelectItem key={`metadata:${value}`} value={value}>
+                            {label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-medium text-foreground/80">Archived</div>
+                    <Select
+                      value={archivedFilter}
+                      onValueChange={(value) =>
+                        setArchivedFilter(value as EnterpriseArchivedFilter)
+                      }
+                    >
+                      <SelectTrigger className="w-full justify-between bg-background/80">
+                        <SelectValue placeholder="Any company state" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(archivedFilterLabels).map(([value, label]) => (
+                          <SelectItem key={`archived:${value}`} value={value}>
+                            {label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-medium text-foreground/80">Errors</div>
+                    <Select
+                      value={errorFilter}
+                      onValueChange={(value) => setErrorFilter(value as EnterpriseErrorFilter)}
+                    >
+                      <SelectTrigger className="w-full justify-between bg-background/80">
+                        <SelectValue placeholder="Any error state" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(errorFilterLabels).map(([value, label]) => (
+                          <SelectItem key={`error:${value}`} value={value}>
+                            {label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-medium text-foreground/80">Link scope</div>
+                    <Select
+                      value={crossCompanyFilter}
+                      onValueChange={(value) =>
+                        setCrossCompanyFilter(value as EnterpriseCrossCompanyFilter)
+                      }
+                    >
+                      <SelectTrigger className="w-full justify-between bg-background/80">
+                        <SelectValue placeholder="Any link scope" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(crossCompanyFilterLabels).map(([value, label]) => (
+                          <SelectItem key={`scope:${value}`} value={value}>
+                            {label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-border/70 bg-background/55 p-3 dark:border-white/10 dark:bg-slate-950/45">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                     Visibility
                   </div>
                   <span className="text-[10px] text-muted-foreground">Live layer controls</span>
@@ -2637,7 +3140,7 @@ export function OrgChart({
               {(wiringVisibility.showCompanyContainers || wiringVisibility.showCompanyNames)
                 ? companyGroups.map((group) => {
                     const groupHighlighted =
-                      !companyScopedFilterActive || highlightedCompanyKeys.has(group.key);
+                      !enterpriseNodeFilterActive || highlightedCompanyKeys.has(group.key);
 
                     return (
                       <g key={group.key} opacity={groupHighlighted ? 1 : 0.24}>
@@ -2691,10 +3194,10 @@ export function OrgChart({
 
               {wiringVisibility.showAgents && wiringVisibility.showReportsToLines
                 ? filteredHierarchyEdges.map(({ parent, child, crossCompany }) => {
-                    const edgeHighlighted =
-                      !companyScopedFilterActive ||
-                      highlightedNodeIds.has(parent.id) ||
-                      highlightedNodeIds.has(child.id);
+                      const edgeHighlighted =
+                        !enterpriseNodeFilterActive ||
+                        highlightedNodeIds.has(parent.id) ||
+                        highlightedNodeIds.has(child.id);
 
                     return (
                       <path
@@ -2718,7 +3221,7 @@ export function OrgChart({
                       : relationshipCategoryStroke[edge.category];
                     const labelWidth = Math.max(edge.typeLabel.length * 6.25 + 22, 92);
                     const edgeHighlighted =
-                      !companyScopedFilterActive ||
+                      !enterpriseNodeFilterActive ||
                       highlightedNodeIds.has(edge.sourceAgentId) ||
                       highlightedNodeIds.has(edge.targetAgentId);
 
@@ -2760,7 +3263,7 @@ export function OrgChart({
                 ? companyAggregateEdges.map((edge) => {
                     const labelWidth = Math.max(edge.label.length * 6.35 + 22, 108);
                     const edgeHighlighted =
-                      !companyScopedFilterActive ||
+                      !enterpriseNodeFilterActive ||
                       highlightedCompanyKeys.has(edge.sourceKey) ||
                       highlightedCompanyKeys.has(edge.targetKey);
 
@@ -2860,7 +3363,7 @@ export function OrgChart({
                   const isConnectedOverlayNode =
                     !isFocusedAgent && overlayNodeIds.includes(node.id);
                   const nodeHighlighted =
-                    !companyScopedFilterActive ||
+                    !enterpriseNodeFilterActive ||
                     highlightedNodeIds.has(node.id) ||
                     highlightedCompanyKeys.has(companyGroupKey(node.companyId, node.companyName)) ||
                     isFocusedAgent ||

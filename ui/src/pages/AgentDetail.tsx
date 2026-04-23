@@ -670,6 +670,11 @@ export function AgentDetail() {
   });
   const resolvedCompanyId = agent?.companyId ?? selectedCompanyId;
   const canonicalAgentRef = agent ? agentRouteRef(agent) : routeAgentRef;
+  const canonicalCompanyPrefix = useMemo(() => {
+    if (!agent?.companyId) return null;
+    const company = companies.find((entry) => entry.id === agent.companyId);
+    return company?.issuePrefix?.toUpperCase() ?? null;
+  }, [agent?.companyId, companies]);
   const agentLookupRef = agent?.id ?? routeAgentRef;
   const resolvedAgentId = agent?.id ?? null;
 
@@ -755,9 +760,15 @@ export function AgentDetail() {
 
   useEffect(() => {
     if (!agent) return;
+    const currentCompanyPrefix = companyPrefix?.toUpperCase() ?? null;
+    const needsCompanyPrefixRewrite =
+      Boolean(canonicalCompanyPrefix) && canonicalCompanyPrefix !== currentCompanyPrefix;
     if (urlRunId) {
-      if (routeAgentRef !== canonicalAgentRef) {
-        navigate(`/agents/${canonicalAgentRef}/runs/${urlRunId}`, { replace: true });
+      if (routeAgentRef !== canonicalAgentRef || needsCompanyPrefixRewrite) {
+        const targetPath = canonicalCompanyPrefix
+          ? `/${canonicalCompanyPrefix}/agents/${canonicalAgentRef}/runs/${urlRunId}`
+          : `/agents/${canonicalAgentRef}/runs/${urlRunId}`;
+        navigate(targetPath, { replace: true });
       }
       return;
     }
@@ -775,11 +786,24 @@ export function AgentDetail() {
               : activeView === "budget"
                 ? "budget"
               : "dashboard";
-    if (routeAgentRef !== canonicalAgentRef || urlTab !== canonicalTab) {
-      navigate(`/agents/${canonicalAgentRef}/${canonicalTab}`, { replace: true });
+    if (routeAgentRef !== canonicalAgentRef || urlTab !== canonicalTab || needsCompanyPrefixRewrite) {
+      const targetPath = canonicalCompanyPrefix
+        ? `/${canonicalCompanyPrefix}/agents/${canonicalAgentRef}/${canonicalTab}`
+        : `/agents/${canonicalAgentRef}/${canonicalTab}`;
+      navigate(targetPath, { replace: true });
       return;
     }
-  }, [agent, routeAgentRef, canonicalAgentRef, urlRunId, urlTab, activeView, navigate]);
+  }, [
+    activeView,
+    agent,
+    canonicalAgentRef,
+    canonicalCompanyPrefix,
+    companyPrefix,
+    navigate,
+    routeAgentRef,
+    urlRunId,
+    urlTab,
+  ]);
 
   useEffect(() => {
     if (!agent?.companyId || agent.companyId === selectedCompanyId) return;

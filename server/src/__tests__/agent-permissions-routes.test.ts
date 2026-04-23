@@ -351,6 +351,66 @@ describe("agent permission routes", () => {
     expect(res.body.access.taskAssignSource).toBe("explicit_grant");
   });
 
+  it("lets organization designers read enterprise relationships without configuration access", async () => {
+    const actorAgentId = "44444444-4444-4444-8444-444444444444";
+    mockAgentService.getById
+      .mockResolvedValueOnce({
+        ...baseAgent,
+        adapterConfig: { apiKey: "secret" },
+        runtimeConfig: { heartbeat: { enabled: true, intervalSec: 300 } },
+      })
+      .mockResolvedValueOnce({
+        ...baseAgent,
+        id: actorAgentId,
+        permissions: {
+          canCreateAgents: false,
+          canDesignOrganizations: true,
+        },
+      });
+    mockAgentService.getEnterpriseRelationshipsView.mockResolvedValue({
+      version: 1,
+      updatedAt: "2026-04-15T09:30:00.000Z",
+      customTypes: [],
+      availableTypes: emptyEnterpriseRelationshipsView.availableTypes,
+      links: [
+        {
+          id: "link-1",
+          typeKey: "dottedLineTo",
+          targetAgentId: "33333333-3333-4333-8333-333333333333",
+          notes: "Matrix review",
+        },
+      ],
+    });
+
+    const app = createApp({
+      type: "agent",
+      agentId: actorAgentId,
+      companyId,
+      runId: "run-1",
+      source: "agent_key",
+    });
+
+    const res = await request(app).get(`/api/agents/${agentId}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.adapterConfig).toEqual({});
+    expect(res.body.runtimeConfig).toEqual({});
+    expect(res.body.enterpriseRelationships).toEqual({
+      version: 1,
+      updatedAt: "2026-04-15T09:30:00.000Z",
+      customTypes: [],
+      availableTypes: emptyEnterpriseRelationshipsView.availableTypes,
+      links: [
+        {
+          id: "link-1",
+          typeKey: "dottedLineTo",
+          targetAgentId: "33333333-3333-4333-8333-333333333333",
+          notes: "Matrix review",
+        },
+      ],
+    });
+  });
+
   it("keeps task assignment enabled when agent creation privilege is enabled", async () => {
     mockAgentService.updatePermissions.mockResolvedValue({
       ...baseAgent,
@@ -497,6 +557,42 @@ describe("agent permission routes", () => {
         entityId: agentId,
       }),
     );
+  });
+
+  it("allows explicit relationship-type managers to update another agent's enterprise relationships", async () => {
+    const actorAgentId = "44444444-4444-4444-8444-444444444444";
+    mockAgentService.getById
+      .mockResolvedValueOnce(baseAgent)
+      .mockResolvedValueOnce({
+        ...baseAgent,
+        id: actorAgentId,
+        permissions: {
+          canCreateAgents: false,
+          canManageRelationshipTypes: true,
+        },
+      });
+
+    const app = createApp({
+      type: "agent",
+      agentId: actorAgentId,
+      companyId,
+      runId: "run-1",
+      source: "agent_key",
+    });
+
+    const res = await request(app)
+      .put(`/api/agents/${agentId}/enterprise-relationships`)
+      .send({
+        relationships: {
+          version: 1,
+          updatedAt: null,
+          customTypes: [],
+          links: [],
+        },
+      });
+
+    expect(res.status).toBe(200);
+    expect(mockAgentService.update).toHaveBeenCalled();
   });
 
   it("rejects generic metadata patches for enterprise relationships", async () => {
