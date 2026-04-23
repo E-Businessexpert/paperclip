@@ -44,7 +44,7 @@ interface CompanyBlueprint {
   services: string[];
 }
 
-interface CompanyWireEdge {
+export interface CompanyWireEdge {
   key: string;
   sourceCompanyId: string;
   sourceCompanyName: string | null;
@@ -87,7 +87,7 @@ const GRAPH_NODE_WIDTH = 246;
 const GRAPH_NODE_HEIGHT = 118;
 const GRAPH_COLUMN_GAP = 58;
 const GRAPH_ROW_GAP = 190;
-const GRAPH_MARGIN_X = 86;
+const GRAPH_MARGIN_X = 56;
 
 function blueprintSort(left: CompanyBlueprint, right: CompanyBlueprint): number {
   const levelDelta = left.hierarchyLevel - right.hierarchyLevel;
@@ -96,13 +96,13 @@ function blueprintSort(left: CompanyBlueprint, right: CompanyBlueprint): number 
 }
 
 function hierarchyTierLabel(level: number): string {
-  return `Tier ${level + 1}`;
+  return `Level ${level + 1}`;
 }
 
 function hierarchyTierDescription(level: number): string {
   return level === 0
-    ? "Route roots and companies with no upstream inter-company reporting parent."
-    : `Companies reached ${level} inter-company reporting step${level === 1 ? "" : "s"} below the route roots.`;
+    ? "Route roots for the selected inter-company structure."
+    : `Companies reached ${level} inter-company hierarchy step${level === 1 ? "" : "s"} below the route roots.`;
 }
 
 function formatLabel(value: string | null | undefined): string {
@@ -196,20 +196,20 @@ function splitLabel(value: string, maxLineLength = 23): string[] {
   return lines.length > 0 ? lines : [value];
 }
 
-function collectCompanyHierarchyEdges(roots: EnterpriseGraphOrgNode[]): CompanyWireEdge[] {
+export function collectCompanyHierarchyEdges(roots: EnterpriseGraphOrgNode[]): CompanyWireEdge[] {
   const edgeCounts = new Map<string, CompanyWireEdge>();
 
   function visit(node: EnterpriseGraphOrgNode, parent: EnterpriseGraphOrgNode | null) {
     if (parent && parent.companyId !== node.companyId) {
-      const key = `${parent.companyId}:${node.companyId}:reports-to`;
+      const key = `${parent.companyId}:${node.companyId}:hierarchy`;
       const current = edgeCounts.get(key) ?? {
         key,
         sourceCompanyId: parent.companyId,
         sourceCompanyName: parent.companyName,
         targetCompanyId: node.companyId,
         targetCompanyName: node.companyName,
-        category: "reports-to",
-        label: "Reports-to",
+        category: "hierarchy",
+        label: "Hierarchy",
         count: 0,
         kind: "hierarchy" as const,
       };
@@ -228,7 +228,7 @@ function collectCompanyHierarchyEdges(roots: EnterpriseGraphOrgNode[]): CompanyW
   );
 }
 
-function collectCompanyRelationshipEdges(links: EnterpriseGraphLink[]): CompanyWireEdge[] {
+export function collectCompanyRelationshipEdges(links: EnterpriseGraphLink[]): CompanyWireEdge[] {
   const edgeCounts = new Map<string, CompanyWireEdge>();
 
   for (const link of links) {
@@ -257,6 +257,50 @@ function collectCompanyRelationshipEdges(links: EnterpriseGraphLink[]): CompanyW
     || (left.targetCompanyName ?? "").localeCompare(right.targetCompanyName ?? "")
     || left.key.localeCompare(right.key),
   );
+}
+
+export function getRouteScopedCompanyIds(
+  companies: Company[],
+  hierarchyEdges: CompanyWireEdge[],
+  relationshipEdges: CompanyWireEdge[],
+  seedCompanyId: string | null | undefined,
+): Set<string> {
+  const companyIds = new Set(companies.map((company) => company.id));
+  if (!seedCompanyId || !companyIds.has(seedCompanyId)) {
+    return companyIds;
+  }
+
+  const adjacency = new Map<string, Set<string>>();
+  const addAdjacent = (left: string, right: string) => {
+    if (!companyIds.has(left) || !companyIds.has(right) || left === right) return;
+    const leftNeighbors = adjacency.get(left) ?? new Set<string>();
+    leftNeighbors.add(right);
+    adjacency.set(left, leftNeighbors);
+
+    const rightNeighbors = adjacency.get(right) ?? new Set<string>();
+    rightNeighbors.add(left);
+    adjacency.set(right, rightNeighbors);
+  };
+
+  for (const edge of [...hierarchyEdges, ...relationshipEdges]) {
+    addAdjacent(edge.sourceCompanyId, edge.targetCompanyId);
+  }
+
+  const scopedIds = new Set<string>([seedCompanyId]);
+  const queue = [seedCompanyId];
+
+  while (queue.length > 0) {
+    const currentId = queue.shift();
+    if (!currentId) continue;
+
+    for (const nextId of adjacency.get(currentId) ?? []) {
+      if (scopedIds.has(nextId)) continue;
+      scopedIds.add(nextId);
+      queue.push(nextId);
+    }
+  }
+
+  return scopedIds;
 }
 
 function buildCompanyHierarchyLevels(
@@ -304,7 +348,7 @@ function buildCompanyHierarchyLevels(
 function buildGraphLayout(
   blueprints: CompanyBlueprint[],
   links: CompanyWireEdge[],
-  minimumWidth = 1280,
+  minimumWidth = 960,
 ): CompanyGraphLayout {
   const levels = Array.from(new Set(blueprints.map((blueprint) => blueprint.hierarchyLevel))).sort((left, right) => left - right);
   const maxRowSize = levels.reduce((max, level) => {
@@ -319,7 +363,7 @@ function buildGraphLayout(
       + GRAPH_MARGIN_X * 2,
   );
   const nodes: CompanyGraphNode[] = [];
-  let cursorY = 104;
+  let cursorY = 76;
 
   function addRow(rowBlueprints: CompanyBlueprint[], y: number, columnLimit = rowBlueprints.length) {
     if (rowBlueprints.length === 0) return;
@@ -389,8 +433,8 @@ function buildGraphLayout(
     .filter((edge): edge is CompanyGraphEdge => edge !== null);
 
   const graphHeight = Math.max(
-    620,
-    cursorY + GRAPH_NODE_HEIGHT,
+    560,
+    cursorY + GRAPH_NODE_HEIGHT - 52,
   );
 
   return {
@@ -762,20 +806,44 @@ export function FullStructurePage() {
     () => collectCompanyRelationshipEdges(graphLinks),
     [graphLinks],
   );
+  const routeScopedCompanyIds = useMemo(
+    () => getRouteScopedCompanyIds(
+      activeCompanies,
+      hierarchyCompanyEdges,
+      relationshipCompanyEdges,
+      routeCompany?.id ?? null,
+    ),
+    [activeCompanies, hierarchyCompanyEdges, relationshipCompanyEdges, routeCompany?.id],
+  );
+  const structureCompanies = useMemo(
+    () => activeCompanies.filter((company) => routeScopedCompanyIds.has(company.id)),
+    [activeCompanies, routeScopedCompanyIds],
+  );
   const companyWireEdges = useMemo(
     () => [...hierarchyCompanyEdges, ...relationshipCompanyEdges],
     [hierarchyCompanyEdges, relationshipCompanyEdges],
   );
-  const hierarchyLevels = useMemo(
-    () => buildCompanyHierarchyLevels(activeCompanies, hierarchyCompanyEdges),
-    [activeCompanies, hierarchyCompanyEdges],
+  const scopedCompanyWireEdges = useMemo(
+    () => companyWireEdges.filter((edge) =>
+      routeScopedCompanyIds.has(edge.sourceCompanyId)
+      && routeScopedCompanyIds.has(edge.targetCompanyId),
+    ),
+    [companyWireEdges, routeScopedCompanyIds],
   );
-  const relationshipCategories = useMemo(() => relationshipSummary(companyWireEdges), [companyWireEdges]);
+  const scopedGraphNodes = useMemo(
+    () => graphNodes.filter((node) => routeScopedCompanyIds.has(node.companyId)),
+    [graphNodes, routeScopedCompanyIds],
+  );
+  const hierarchyLevels = useMemo(
+    () => buildCompanyHierarchyLevels(structureCompanies, hierarchyCompanyEdges),
+    [structureCompanies, hierarchyCompanyEdges],
+  );
+  const relationshipCategories = useMemo(() => relationshipSummary(scopedCompanyWireEdges), [scopedCompanyWireEdges]);
 
   const blueprints = useMemo(() => {
-    return activeCompanies
+    return structureCompanies
       .map((company): CompanyBlueprint => {
-        const agents = graphNodes.filter((agent) => agent.companyId === company.id);
+        const agents = scopedGraphNodes.filter((agent) => agent.companyId === company.id);
         return {
           company,
           hierarchyLevel: hierarchyLevels.get(company.id) ?? 0,
@@ -788,7 +856,7 @@ export function FullStructurePage() {
         };
       })
       .sort(blueprintSort);
-  }, [activeCompanies, graphNodes, hierarchyCompanyEdges, hierarchyLevels, relationshipCompanyEdges]);
+  }, [hierarchyCompanyEdges, hierarchyLevels, relationshipCompanyEdges, scopedGraphNodes, structureCompanies]);
 
   const filteredBlueprints = useMemo(() => {
     return blueprints.filter((blueprint) => {
@@ -806,17 +874,17 @@ export function FullStructurePage() {
   );
 
   const visibleGraphLinks = useMemo(() => {
-    return companyWireEdges.filter((link) => {
+    return scopedCompanyWireEdges.filter((link) => {
       if (!visibleCompanyIds.has(link.sourceCompanyId) || !visibleCompanyIds.has(link.targetCompanyId)) return false;
       return relationshipFilter === "all" || link.category === relationshipFilter;
     });
-  }, [companyWireEdges, relationshipFilter, visibleCompanyIds]);
+  }, [relationshipFilter, scopedCompanyWireEdges, visibleCompanyIds]);
 
   const graphLayout = useMemo(
     () => buildGraphLayout(
       filteredBlueprints,
       visibleGraphLinks,
-      Math.max(1280, viewportWidth - (isFullscreen ? 0 : 40)),
+      Math.max(760, viewportWidth - (isFullscreen ? 0 : 40)),
     ),
     [filteredBlueprints, isFullscreen, viewportWidth, visibleGraphLinks],
   );
@@ -839,12 +907,19 @@ export function FullStructurePage() {
     relationshipFilter !== "all",
     searchValue.trim().length > 0,
   ].filter(Boolean).length;
-  const totalHierarchyLinks = hierarchyCompanyEdges.reduce((total, edge) => total + edge.count, 0);
-  const totalRelationshipLinks = relationshipCompanyEdges.reduce((total, edge) => total + edge.count, 0);
+  const scopedHierarchyLinks = scopedCompanyWireEdges
+    .filter((edge) => edge.kind === "hierarchy")
+    .reduce((total, edge) => total + edge.count, 0);
+  const scopedRelationshipLinks = scopedCompanyWireEdges
+    .filter((edge) => edge.kind === "relationship")
+    .reduce((total, edge) => total + edge.count, 0);
   const totalVisibleLinks = visibleGraphLinks.reduce((total, edge) => total + edge.count, 0);
   const seedLabel = graphSeedCompany
     ? `${graphSeedCompany.issuePrefix} / ${graphSeedCompany.name}`
     : "No route seed";
+  const routeScopeLabel = routeCompany
+    ? `${routeCompany.issuePrefix} connected structure`
+    : "Global structure";
 
   const backTo =
     typeof (location.state as { backTo?: string } | null)?.backTo === "string"
@@ -915,8 +990,8 @@ export function FullStructurePage() {
                   Full Corporation Structure
                 </h1>
                 <p className="mt-4 max-w-2xl text-sm leading-6 text-white/72 md:text-base">
-                  A browser-wide live graph for the whole corporation, seeded from the active
-                  company route and drawn from real reports-to hierarchy plus inter-company links.
+                  A browser-wide live graph for the route-connected company structure, seeded
+                  from the active company route and drawn from real inter-company hierarchy.
                 </p>
                 <p className="mt-3 text-xs text-white/54">
                   Route seed: {seedLabel}. Auto-refreshes every 15 seconds.
@@ -924,9 +999,9 @@ export function FullStructurePage() {
               </div>
 
               <div className="grid gap-3 sm:grid-cols-3 lg:w-[34rem]">
-                <StructureStat icon={Building2} label="Organizations" value={activeCompanies.length} detail="entities inside the feature" />
-                <StructureStat icon={Users} label="Agents" value={graphNodes.length} detail="visible workforce nodes" />
-                <StructureStat icon={Network} label="Wiring" value={totalHierarchyLinks + totalRelationshipLinks} detail={`${totalHierarchyLinks} hierarchy / ${totalRelationshipLinks} enterprise`} />
+                <StructureStat icon={Building2} label="Organizations" value={structureCompanies.length} detail={routeScopeLabel} />
+                <StructureStat icon={Users} label="Agents" value={scopedGraphNodes.length} detail="route-scoped workforce nodes" />
+                <StructureStat icon={Network} label="Wiring" value={scopedHierarchyLinks + scopedRelationshipLinks} detail={`${scopedHierarchyLinks} hierarchy / ${scopedRelationshipLinks} enterprise`} />
               </div>
             </div>
           </header>
@@ -951,7 +1026,7 @@ export function FullStructurePage() {
                     </span>
                   </div>
                   <h2 className="truncate text-lg font-semibold tracking-tight text-white md:text-xl">
-                    Route-seeded corporation graph
+                    Route-connected structure graph
                   </h2>
                 </div>
               </div>
@@ -959,15 +1034,15 @@ export function FullStructurePage() {
               <div className="grid flex-[2] gap-2 md:grid-cols-2 xl:grid-cols-[1fr_0.8fr_0.9fr_1.2fr_auto_auto_auto] xl:items-end">
                 <FilterSelect label="Organization" value={companyFilter} onChange={setCompanyFilter}>
                   <option value="all">All organizations</option>
-                  {activeCompanies.map((company) => (
+                  {structureCompanies.map((company) => (
                     <option key={company.id} value={company.id}>
                       {company.name}
                     </option>
                   ))}
                 </FilterSelect>
 
-                <FilterSelect label="Tier" value={tierFilter} onChange={setTierFilter}>
-                  <option value="all">All hierarchy tiers</option>
+                <FilterSelect label="Level" value={tierFilter} onChange={setTierFilter}>
+                  <option value="all">All hierarchy levels</option>
                   {availableTiers.map((tier) => (
                     <option key={tier} value={String(tier)}>
                       {hierarchyTierLabel(tier)}
@@ -1032,13 +1107,13 @@ export function FullStructurePage() {
 
             <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-400">
               <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
-                Showing {filteredBlueprints.length} of {activeCompanies.length} organizations
+                Showing {filteredBlueprints.length} of {structureCompanies.length} route-scoped organizations
               </span>
               <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
                 {totalVisibleLinks} visible hierarchy and enterprise links
               </span>
               <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
-                Seeded by {seedLabel}
+                Scope: {routeScopeLabel} · Seeded by {seedLabel}
               </span>
             </div>
           </div>
@@ -1064,7 +1139,7 @@ export function FullStructurePage() {
                     Company detail cards
                   </p>
                   <h2 className="mt-1 text-2xl font-semibold tracking-tight text-foreground">
-                    Filtered organizations inside the standalone feature
+                    Filtered organizations inside this route-connected structure
                   </h2>
                 </div>
                 <div className="rounded-full border border-border bg-muted/45 px-3 py-1 text-xs text-muted-foreground">
@@ -1086,7 +1161,7 @@ export function FullStructurePage() {
                             {hierarchyTierLabel(tier)}
                           </div>
                           <h3 className="mt-1 text-base font-semibold text-foreground">
-                            Route-derived hierarchy tier
+                            Route-derived hierarchy level
                           </h3>
                         </div>
                         <p className="max-w-xl text-xs leading-5 text-muted-foreground">
@@ -1105,7 +1180,7 @@ export function FullStructurePage() {
                         </div>
                       ) : (
                         <div className="rounded-2xl border border-dashed border-border bg-background/70 p-4 text-sm text-muted-foreground">
-                          No companies in this hierarchy tier match the current filters.
+                          No companies in this hierarchy level match the current filters.
                         </div>
                       )}
                     </div>
