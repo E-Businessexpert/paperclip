@@ -9,6 +9,7 @@ import {
   Eye,
   EyeOff,
   GitBranch,
+  Maximize2,
   Network,
   SlidersHorizontal,
   Upload,
@@ -2426,6 +2427,27 @@ export function OrgChart({
     setSelectedInspectorItem(null);
   }, [effectiveViewMode, enterpriseScope, startExpanded]);
 
+  const expandGraphWorkspace = useCallback(() => {
+    setFiltersOpen(false);
+    setInspectorMinimized(true);
+    setCollapsedNodeIds(new Set());
+    setWiringVisibility({
+      showCompanyContainers: true,
+      showCompanyNames: true,
+      showAgents: true,
+      showAgentNames: true,
+      showPermissions: true,
+      showReportsToLines: true,
+      showRelationshipLines: true,
+    });
+
+    const graphElement = containerRef.current;
+    if (!graphElement?.requestFullscreen) return;
+    void graphElement.requestFullscreen().catch(() => {
+      // Browser fullscreen can be blocked by policy; layout expansion still applies.
+    });
+  }, []);
+
   const handleWiringVisibilityChange = useCallback(
     (key: keyof WiringVisibilityState, checked: boolean) => {
       setWiringVisibility((previous) => {
@@ -2703,6 +2725,12 @@ export function OrgChart({
             <Button size="sm" variant="outline" onClick={resetEnterpriseFilters}>
               Reset filters
             </Button>
+            {fullscreen ? (
+              <Button size="sm" variant="outline" onClick={expandGraphWorkspace}>
+                <Maximize2 className="mr-1.5 h-3.5 w-3.5" />
+                Graph full screen
+              </Button>
+            ) : null}
 
             <div className="ml-auto flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
               <span className="rounded-full border border-border/70 bg-background/75 px-2.5 py-1 dark:border-white/10 dark:bg-slate-950/70">
@@ -2753,7 +2781,10 @@ export function OrgChart({
 
       <div className="flex flex-1 flex-col gap-3">
         {effectiveViewMode === "enterprise" && filtersOpen ? (
-          <section className="flex shrink-0 flex-col rounded-2xl border border-border/70 bg-gradient-to-br from-card/95 via-card/90 to-muted/50 p-3 shadow-sm dark:border-white/10 dark:from-slate-950/90 dark:via-slate-950/84 dark:to-slate-900/74">
+          <section
+            data-full-structure-filters
+            className="flex shrink-0 flex-col rounded-2xl border border-border/70 bg-gradient-to-br from-card/95 via-card/90 to-muted/50 p-3 shadow-sm dark:border-white/10 dark:from-slate-950/90 dark:via-slate-950/84 dark:to-slate-900/74"
+          >
             <div className="border-b border-border/70 pb-3 dark:border-white/10">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -3217,6 +3248,7 @@ export function OrgChart({
         >
           <div
             ref={containerRef}
+            data-full-structure-graph
             className={cn(
               "relative min-w-0 flex-1 overflow-hidden border border-border/70 bg-gradient-to-br from-slate-100/70 via-background to-slate-200/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] dark:border-white/10 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900/90",
               fullscreen ? "min-h-[78dvh] rounded-3xl" : "min-h-[440px] rounded-2xl",
