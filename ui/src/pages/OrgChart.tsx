@@ -92,6 +92,8 @@ interface OrgChartProps {
   fullscreen?: boolean;
   initialViewMode?: OrgViewMode;
   lockViewMode?: OrgViewMode;
+  startExpanded?: boolean;
+  defaultInspectorMinimized?: boolean;
   showBackButton?: boolean;
   backHref?: string | null;
   title?: string;
@@ -515,6 +517,7 @@ function persistOrgViewMode(nextViewMode: OrgViewMode) {
 function createDefaultWiringVisibility(
   enterpriseScope: EnterpriseGraphScopeMode,
   viewMode: OrgViewMode,
+  startExpanded = false,
 ): WiringVisibilityState {
   if (viewMode !== "enterprise") {
     return {
@@ -525,6 +528,18 @@ function createDefaultWiringVisibility(
       showPermissions: true,
       showReportsToLines: true,
       showRelationshipLines: false,
+    };
+  }
+
+  if (startExpanded) {
+    return {
+      showCompanyContainers: true,
+      showCompanyNames: true,
+      showAgents: true,
+      showAgentNames: true,
+      showPermissions: true,
+      showReportsToLines: true,
+      showRelationshipLines: true,
     };
   }
 
@@ -1031,6 +1046,8 @@ export function OrgChart({
   fullscreen = false,
   initialViewMode = "hierarchy",
   lockViewMode,
+  startExpanded = false,
+  defaultInspectorMinimized = false,
   showBackButton = false,
   backHref = null,
   title,
@@ -1067,10 +1084,10 @@ export function OrgChart({
   const [crossCompanyFilter, setCrossCompanyFilter] =
     useState<EnterpriseCrossCompanyFilter>("all");
   const [wiringVisibility, setWiringVisibility] = useState<WiringVisibilityState>(() =>
-    createDefaultWiringVisibility(enterpriseScope, initialStoredViewMode),
+    createDefaultWiringVisibility(enterpriseScope, initialStoredViewMode, startExpanded),
   );
   const [filtersOpen, setFiltersOpen] = useState(() => initialStoredViewMode === "enterprise");
-  const [inspectorMinimized, setInspectorMinimized] = useState(false);
+  const [inspectorMinimized, setInspectorMinimized] = useState(defaultInspectorMinimized);
   const [collapsedNodeIds, setCollapsedNodeIds] = useState<Set<string>>(new Set());
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
@@ -1156,10 +1173,18 @@ export function OrgChart({
     setArchivedFilter("all");
     setErrorFilter("all");
     setCrossCompanyFilter("all");
-    setWiringVisibility(createDefaultWiringVisibility(enterpriseScope, effectiveViewMode));
+    setWiringVisibility(
+      createDefaultWiringVisibility(enterpriseScope, effectiveViewMode, startExpanded),
+    );
     setFiltersOpen(effectiveViewMode === "enterprise");
-    setInspectorMinimized(false);
-  }, [enterpriseScope, effectiveViewMode, selectedCompanyId]);
+    setInspectorMinimized(defaultInspectorMinimized);
+  }, [
+    defaultInspectorMinimized,
+    enterpriseScope,
+    effectiveViewMode,
+    selectedCompanyId,
+    startExpanded,
+  ]);
 
   useEffect(() => {
     if (!wiringVisibility.showPermissions && selectedInspectorItem?.startsWith("permission:")) {
@@ -1308,6 +1333,11 @@ export function OrgChart({
   const childCountMap = useMemo(() => buildChildCountMap(rawRoots), [rawRoots]);
 
   useEffect(() => {
+    if (startExpanded) {
+      setCollapsedNodeIds(new Set());
+      return;
+    }
+
     if (fullscreen && effectiveViewMode === "hierarchy") {
       setCollapsedNodeIds(buildRootPreviewCollapsedNodeIds(rawRoots));
       return;
@@ -1319,7 +1349,7 @@ export function OrgChart({
     }
 
     setCollapsedNodeIds(new Set());
-  }, [effectiveViewMode, enterpriseScope, fullscreen, rawRoots, selectedCompanyId]);
+  }, [effectiveViewMode, enterpriseScope, fullscreen, rawRoots, selectedCompanyId, startExpanded]);
 
   const activeRoots = useMemo(
     () => rawRoots.map((root) => applyCollapsedReports(root, collapsedNodeIds)),
@@ -2392,9 +2422,9 @@ export function OrgChart({
     setArchivedFilter("all");
     setErrorFilter("all");
     setCrossCompanyFilter("all");
-    setWiringVisibility(createDefaultWiringVisibility(enterpriseScope, effectiveViewMode));
+    setWiringVisibility(createDefaultWiringVisibility(enterpriseScope, effectiveViewMode, startExpanded));
     setSelectedInspectorItem(null);
-  }, [effectiveViewMode, enterpriseScope]);
+  }, [effectiveViewMode, enterpriseScope, startExpanded]);
 
   const handleWiringVisibilityChange = useCallback(
     (key: keyof WiringVisibilityState, checked: boolean) => {
@@ -2565,7 +2595,7 @@ export function OrgChart({
   }
 
   return (
-    <div className={cn("flex h-full flex-col gap-3", fullscreen && "h-full")}>
+    <div className={cn("flex min-h-full flex-col gap-3", fullscreen && "h-auto")}>
       {showBackButton ? (
         <div className="flex shrink-0 items-center justify-between gap-3 rounded-2xl border border-border/70 bg-gradient-to-r from-card/95 via-card/90 to-muted/55 px-4 py-3 shadow-sm dark:border-white/10 dark:from-slate-950/92 dark:via-slate-950/86 dark:to-slate-900/72">
           <div className="flex min-w-0 items-center gap-3">
@@ -2721,7 +2751,7 @@ export function OrgChart({
         </>
       ) : null}
 
-      <div className="flex min-h-0 flex-1 flex-col gap-3">
+      <div className="flex flex-1 flex-col gap-3">
         {effectiveViewMode === "enterprise" && filtersOpen ? (
           <section className="flex shrink-0 flex-col rounded-2xl border border-border/70 bg-gradient-to-br from-card/95 via-card/90 to-muted/50 p-3 shadow-sm dark:border-white/10 dark:from-slate-950/90 dark:via-slate-950/84 dark:to-slate-900/74">
             <div className="border-b border-border/70 pb-3 dark:border-white/10">
@@ -3179,20 +3209,25 @@ export function OrgChart({
           </section>
         ) : null}
 
-        <div className="flex min-h-0 flex-1 flex-col gap-3 xl:flex-row">
         <div
-          ref={containerRef}
           className={cn(
-            "relative min-h-[440px] min-w-0 flex-1 overflow-hidden border border-border/70 bg-gradient-to-br from-slate-100/70 via-background to-slate-200/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] dark:border-white/10 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900/90",
-            fullscreen ? "rounded-3xl" : "rounded-2xl",
+            "flex flex-1 flex-col gap-3 xl:flex-row",
+            fullscreen && "min-h-[78dvh]",
           )}
-          style={{ cursor: dragging ? "grabbing" : "grab" }}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
-          onWheel={handleWheel}
         >
+          <div
+            ref={containerRef}
+            className={cn(
+              "relative min-w-0 flex-1 overflow-hidden border border-border/70 bg-gradient-to-br from-slate-100/70 via-background to-slate-200/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] dark:border-white/10 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900/90",
+              fullscreen ? "min-h-[78dvh] rounded-3xl" : "min-h-[440px] rounded-2xl",
+            )}
+            style={{ cursor: dragging ? "grabbing" : "grab" }}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+            onWheel={handleWheel}
+          >
           <div
             className="pointer-events-none absolute inset-0 opacity-90"
             style={{
