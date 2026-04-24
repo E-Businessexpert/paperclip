@@ -35,6 +35,7 @@ export function companyService(db: Db) {
 
   const companySelection = {
     id: companies.id,
+    parentCompanyId: companies.parentCompanyId,
     name: companies.name,
     description: companies.description,
     status: companies.status,
@@ -169,6 +170,14 @@ export function companyService(db: Db) {
     },
 
     create: async (data: typeof companies.$inferInsert) => {
+      if (data.parentCompanyId) {
+        const parent = await getCompanyQuery(db)
+          .where(eq(companies.id, data.parentCompanyId))
+          .then((rows) => rows[0] ?? null);
+        if (!parent) {
+          throw notFound("Parent company not found");
+        }
+      }
       const created = await createCompanyWithUniquePrefix(data);
       const row = await getCompanyQuery(db)
         .where(eq(companies.id, created.id))
@@ -189,6 +198,21 @@ export function companyService(db: Db) {
         if (!existing) return null;
 
         const { logoAssetId, ...companyPatch } = data;
+
+        if (companyPatch.parentCompanyId !== undefined) {
+          if (companyPatch.parentCompanyId === id) {
+            throw unprocessable("Company cannot be its own parent");
+          }
+
+          if (companyPatch.parentCompanyId) {
+            const parent = await getCompanyQuery(tx)
+              .where(eq(companies.id, companyPatch.parentCompanyId))
+              .then((rows) => rows[0] ?? null);
+            if (!parent) {
+              throw notFound("Parent company not found");
+            }
+          }
+        }
 
         if (logoAssetId !== undefined && logoAssetId !== null) {
           const nextLogoAsset = await tx

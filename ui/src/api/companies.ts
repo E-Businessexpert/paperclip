@@ -21,6 +21,7 @@ export const companiesApi = {
     name: string;
     description?: string | null;
     budgetMonthlyCents?: number;
+    parentCompanyId?: string | null;
   }) =>
     api.post<Company>("/companies", data),
   update: (
@@ -36,6 +37,7 @@ export const companiesApi = {
         | "feedbackDataSharingEnabled"
         | "brandColor"
         | "logoAssetId"
+        | "parentCompanyId"
       >
     >,
   ) => api.patch<Company>(`/companies/${companyId}`, data),

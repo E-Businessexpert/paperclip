@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import {
   AGENT_ROLE_LABELS,
+  type Company,
   type EnterpriseGraphLink,
   type EnterpriseGraphNode,
   type EnterpriseRelationshipCategory,
@@ -61,6 +62,10 @@ const PADDING = 60;
 const COMPANY_GROUP_PADDING_X = 28;
 const COMPANY_GROUP_PADDING_Y = 24;
 const COMPANY_GROUP_HEADER_H = 46;
+const COMPANY_TREE_CARD_W = 280;
+const COMPANY_TREE_CARD_H = 116;
+const COMPANY_TREE_GAP_X = 52;
+const COMPANY_TREE_GAP_Y = 108;
 const ORG_VIEW_MODE_STORAGE_KEY = "paperclip.orgChart.viewMode";
 const CROSS_COMPANY_STROKE = "#ef4444";
 const DEFAULT_EDGE_STROKE = "rgba(148, 163, 184, 0.55)";
@@ -882,6 +887,146 @@ function buildCompanyGroups(
     .sort((left, right) => (left.y === right.y ? left.x - right.x : left.y - right.y));
 }
 
+function buildCompanyHierarchyGroups(
+  companies: Company[],
+  nodes: EnterpriseGraphNode[],
+  selectedCompanyId?: string | null,
+): CompanyGroup[] {
+  const companyById = new Map(companies.map((company) => [company.id, company]));
+  const relevantCompanyIds = new Set<string>();
+  const companyAgentCounts = new Map<string, number>();
+  const externalCompanyCounts = new Map<string, number>();
+
+  for (const node of nodes) {
+    if (node.companyId) {
+      relevantCompanyIds.add(node.companyId);
+      companyAgentCounts.set(node.companyId, (companyAgentCounts.get(node.companyId) ?? 0) + 1);
+      continue;
+    }
+
+    if (node.companyName) {
+      externalCompanyCounts.set(node.companyName, (externalCompanyCounts.get(node.companyName) ?? 0) + 1);
+    }
+  }
+
+  const addAncestry = (companyId: string) => {
+    let current = companyById.get(companyId);
+    while (current?.parentCompanyId) {
+      relevantCompanyIds.add(current.parentCompanyId);
+      current = companyById.get(current.parentCompanyId);
+    }
+  };
+
+  Array.from(relevantCompanyIds).forEach(addAncestry);
+  if (selectedCompanyId) {
+    relevantCompanyIds.add(selectedCompanyId);
+    addAncestry(selectedCompanyId);
+  }
+
+  const childrenByParentId = new Map<string | null, Company[]>();
+  for (const companyId of relevantCompanyIds) {
+    const company = companyById.get(companyId);
+    if (!company) continue;
+    const parentId =
+      company.parentCompanyId && relevantCompanyIds.has(company.parentCompanyId)
+        ? company.parentCompanyId
+        : null;
+    const bucket = childrenByParentId.get(parentId) ?? [];
+    bucket.push(company);
+    childrenByParentId.set(parentId, bucket);
+  }
+
+  for (const entry of childrenByParentId.values()) {
+    entry.sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  const measureSubtreeWidth = new Map<string, number>();
+  const measure = (companyId: string): number => {
+    const cached = measureSubtreeWidth.get(companyId);
+    if (cached) return cached;
+
+    const children = childrenByParentId.get(companyId) ?? [];
+    if (children.length === 0) {
+      measureSubtreeWidth.set(companyId, COMPANY_TREE_CARD_W);
+      return COMPANY_TREE_CARD_W;
+    }
+
+    const totalChildrenWidth =
+      children.reduce((sum, child) => sum + measure(child.id), 0) +
+      COMPANY_TREE_GAP_X * Math.max(children.length - 1, 0);
+    const subtreeWidth = Math.max(COMPANY_TREE_CARD_W, totalChildrenWidth);
+    measureSubtreeWidth.set(companyId, subtreeWidth);
+    return subtreeWidth;
+  };
+
+  const groups: CompanyGroup[] = [];
+  const place = (companyId: string, left: number, depth: number) => {
+    const company = companyById.get(companyId);
+    if (!company) return;
+
+    const subtreeWidth = measure(companyId);
+    const key = companyGroupKey(company.id, company.name);
+    groups.push({
+      key,
+      companyId: company.id,
+      companyName: company.name,
+      x: left + (subtreeWidth - COMPANY_TREE_CARD_W) / 2,
+      y: 16 + depth * (COMPANY_TREE_CARD_H + COMPANY_TREE_GAP_Y),
+      width: COMPANY_TREE_CARD_W,
+      height: COMPANY_TREE_CARD_H,
+      nodeCount: companyAgentCounts.get(company.id) ?? 0,
+      external: false,
+      accentColor: pickGroupAccent(key, false, selectedCompanyId ?? undefined, company.id),
+    });
+
+    const children = childrenByParentId.get(company.id) ?? [];
+    let childLeft = left;
+    for (const child of children) {
+      const childWidth = measure(child.id);
+      place(child.id, childLeft, depth + 1);
+      childLeft += childWidth + COMPANY_TREE_GAP_X;
+    }
+  };
+
+  const roots = (childrenByParentId.get(null) ?? []).sort((left, right) =>
+    left.name.localeCompare(right.name),
+  );
+  let rootLeft = 24;
+  for (const root of roots) {
+    const rootWidth = measure(root.id);
+    place(root.id, rootLeft, 0);
+    rootLeft += rootWidth + COMPANY_TREE_GAP_X * 1.4;
+  }
+
+  if (externalCompanyCounts.size > 0) {
+    const externalBaseY =
+      (groups.length > 0
+        ? Math.max(...groups.map((group) => group.y + group.height))
+        : 0) + COMPANY_TREE_GAP_Y;
+    let externalLeft = 24;
+
+    Array.from(externalCompanyCounts.entries())
+      .sort(([left], [right]) => left.localeCompare(right))
+      .forEach(([companyName, count]) => {
+        const key = companyGroupKey(null, companyName);
+        groups.push({
+          key,
+          companyName,
+          x: externalLeft,
+          y: externalBaseY,
+          width: COMPANY_TREE_CARD_W,
+          height: COMPANY_TREE_CARD_H,
+          nodeCount: count,
+          external: true,
+          accentColor: pickGroupAccent(key, true, selectedCompanyId ?? undefined, undefined),
+        });
+        externalLeft += COMPANY_TREE_CARD_W + COMPANY_TREE_GAP_X;
+      });
+  }
+
+  return groups.sort((left, right) => (left.y === right.y ? left.x - right.x : left.y - right.y));
+}
+
 export function OrgChart({
   fullscreen = false,
   initialViewMode = "hierarchy",
@@ -1292,9 +1437,11 @@ export function OrgChart({
   const companyGroups = useMemo(
     () =>
       effectiveViewMode === "enterprise"
-        ? buildCompanyGroups(allNodes, selectedCompanyId)
+        ? wiringVisibility.showAgents
+          ? buildCompanyGroups(allNodes, selectedCompanyId)
+          : buildCompanyHierarchyGroups(companies, enterpriseGraph?.nodes ?? [], selectedCompanyId)
         : [],
-    [allNodes, effectiveViewMode, selectedCompanyId],
+    [allNodes, companies, effectiveViewMode, enterpriseGraph, selectedCompanyId, wiringVisibility.showAgents],
   );
   const companyGroupsMap = useMemo(
     () => new Map(companyGroups.map((group) => [group.key, group])),
@@ -1467,22 +1614,25 @@ export function OrgChart({
   ]);
 
   const bounds = useMemo(() => {
-    if (allNodes.length === 0 && companyGroups.length === 0) {
+    const includeAgentBounds = effectiveViewMode !== "enterprise" || wiringVisibility.showAgents;
+    if ((includeAgentBounds ? allNodes.length : 0) === 0 && companyGroups.length === 0) {
       return { width: 800, height: 600 };
     }
 
     let maxX = 0;
     let maxY = 0;
-    for (const node of allNodes) {
-      maxX = Math.max(maxX, node.x + CARD_W);
-      maxY = Math.max(maxY, node.y + CARD_H);
+    if (includeAgentBounds) {
+      for (const node of allNodes) {
+        maxX = Math.max(maxX, node.x + CARD_W);
+        maxY = Math.max(maxY, node.y + CARD_H);
+      }
     }
     for (const group of companyGroups) {
       maxX = Math.max(maxX, group.x + group.width);
       maxY = Math.max(maxY, group.y + group.height);
     }
     return { width: maxX + PADDING, height: maxY + PADDING };
-  }, [allNodes, companyGroups]);
+  }, [allNodes, companyGroups, effectiveViewMode, wiringVisibility.showAgents]);
 
   const secondaryEdges = useMemo(() => {
     return filteredRelationshipLinks
@@ -1516,32 +1666,24 @@ export function OrgChart({
     const edges: CompanyAggregateEdge[] = [];
 
     if (wiringVisibility.showReportsToLines) {
-      const groupedHierarchy = new Map<
-        string,
-        { sourceKey: string; targetKey: string; count: number }
-      >();
+      const formalCompanyEdges = companies
+        .filter(
+          (company) =>
+            company.parentCompanyId &&
+            companyGroupsMap.has(companyGroupKey(company.parentCompanyId, companies.find((entry) => entry.id === company.parentCompanyId)?.name ?? null)) &&
+            companyGroupsMap.has(companyGroupKey(company.id, company.name)) &&
+            matchesCompanyFilter(company.parentCompanyId, company.id),
+        )
+        .sort((left, right) => left.name.localeCompare(right.name));
 
-      for (const edge of filteredHierarchyEdges) {
-        const sourceKey = companyGroupKey(edge.parent.companyId, edge.parent.companyName);
-        const targetKey = companyGroupKey(edge.child.companyId, edge.child.companyName);
-        if (sourceKey === targetKey) continue;
-
-        const key = `${sourceKey}->${targetKey}`;
-        const existing = groupedHierarchy.get(key);
-        if (existing) {
-          existing.count += 1;
-        } else {
-          groupedHierarchy.set(key, {
-            sourceKey,
-            targetKey,
-            count: 1,
-          });
-        }
-      }
-
-      Array.from(groupedHierarchy.values()).forEach((edge, index) => {
-        const source = companyGroupsMap.get(edge.sourceKey);
-        const target = companyGroupsMap.get(edge.targetKey);
+      formalCompanyEdges.forEach((company, index) => {
+        const sourceKey = companyGroupKey(
+          company.parentCompanyId,
+          companies.find((entry) => entry.id === company.parentCompanyId)?.name ?? null,
+        );
+        const targetKey = companyGroupKey(company.id, company.name);
+        const source = companyGroupsMap.get(sourceKey);
+        const target = companyGroupsMap.get(targetKey);
         if (!source || !target) return;
 
         const x1 = source.x + source.width / 2;
@@ -1550,16 +1692,16 @@ export function OrgChart({
         const y2 = target.y + target.height / 2;
 
         edges.push({
-          id: `company-hierarchy:${edge.sourceKey}:${edge.targetKey}`,
-          sourceKey: edge.sourceKey,
-          targetKey: edge.targetKey,
+          id: `company-hierarchy:${sourceKey}:${targetKey}`,
+          sourceKey,
+          targetKey,
           path: companyCurvePath(source, target, index),
           labelX: (x1 + x2) / 2,
           labelY: (y1 + y2) / 2 - 20 - (index % 2) * 8,
-          label: `${edge.count} reports-to link${edge.count === 1 ? "" : "s"}`,
+          label: "company hierarchy",
           color: hierarchyFocusStroke,
           dashed: false,
-          count: edge.count,
+          count: 1,
         });
       });
     }
@@ -1630,10 +1772,12 @@ export function OrgChart({
     return edges;
   }, [
     chartAccent,
+    companies,
     companyGroupsMap,
     effectiveViewMode,
-    filteredHierarchyEdges,
     filteredRelationshipLinks,
+    hierarchyFocusStroke,
+    matchesCompanyFilter,
     wiringVisibility.showAgents,
     wiringVisibility.showRelationshipLines,
     wiringVisibility.showReportsToLines,
@@ -1641,11 +1785,13 @@ export function OrgChart({
 
   const selectedCompanyGroupKeys = useMemo(
     () =>
-      [companyAFilter, companyBFilter].filter(
-        (companyId): companyId is string =>
-          companyId !== ALL_COMPANIES_FILTER && companyGroupsMap.has(companyId),
-      ),
-    [companyAFilter, companyBFilter, companyGroupsMap],
+      [companyAFilter, companyBFilter].flatMap((companyId) => {
+        if (companyId === ALL_COMPANIES_FILTER) return [];
+        const company = companyOptions.find((option) => option.id === companyId);
+        const key = companyGroupKey(companyId, company?.name ?? null);
+        return companyGroupsMap.has(key) ? [key] : [];
+      }),
+    [companyAFilter, companyBFilter, companyGroupsMap, companyOptions],
   );
 
   const companyAName =
@@ -2575,14 +2721,9 @@ export function OrgChart({
         </>
       ) : null}
 
-      <div className="flex min-h-0 flex-1 flex-col gap-3 xl:flex-row">
+      <div className="flex min-h-0 flex-1 flex-col gap-3">
         {effectiveViewMode === "enterprise" && filtersOpen ? (
-          <aside
-            className={cn(
-              "flex min-h-[320px] shrink-0 flex-col rounded-2xl border border-border/70 bg-gradient-to-br from-card/95 via-card/90 to-muted/50 p-3 shadow-sm dark:border-white/10 dark:from-slate-950/90 dark:via-slate-950/84 dark:to-slate-900/74",
-              fullscreen ? "xl:w-[330px]" : "xl:w-[310px]",
-            )}
-          >
+          <section className="flex shrink-0 flex-col rounded-2xl border border-border/70 bg-gradient-to-br from-card/95 via-card/90 to-muted/50 p-3 shadow-sm dark:border-white/10 dark:from-slate-950/90 dark:via-slate-950/84 dark:to-slate-900/74">
             <div className="border-b border-border/70 pb-3 dark:border-white/10">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -2598,7 +2739,7 @@ export function OrgChart({
               </div>
             </div>
 
-            <div className="mt-3 flex min-h-0 flex-1 flex-col gap-3 overflow-auto pr-1">
+            <div className="mt-3 grid gap-3 xl:grid-cols-2 2xl:grid-cols-4">
               <div className="rounded-xl border border-border/70 bg-background/55 p-3 dark:border-white/10 dark:bg-slate-950/45">
                 <div className="flex items-center justify-between gap-2">
                   <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
@@ -2707,7 +2848,7 @@ export function OrgChart({
                   </span>
                 </div>
 
-                <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-1">
+                <div className="mt-3 grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
                   <div className="space-y-1.5">
                     <div className="text-[11px] font-medium text-foreground/80">Level</div>
                     <Select
@@ -3035,9 +3176,10 @@ export function OrgChart({
                 </div>
               </div>
             </div>
-          </aside>
+          </section>
         ) : null}
 
+        <div className="flex min-h-0 flex-1 flex-col gap-3 xl:flex-row">
         <div
           ref={containerRef}
           className={cn(
@@ -3840,6 +3982,7 @@ export function OrgChart({
             </div>
           </aside>
         )}
+        </div>
       </div>
     </div>
   );
