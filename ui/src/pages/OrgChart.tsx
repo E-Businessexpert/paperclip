@@ -2239,15 +2239,27 @@ export function OrgChart({
     const scaleX = (containerW - 40) / bounds.width;
     const scaleY = (containerH - 40) / bounds.height;
     const fitZoom = Math.min(scaleX, scaleY, 1);
-    const chartW = bounds.width * fitZoom;
-    const chartH = bounds.height * fitZoom;
+    const readableFullStructure =
+      fullscreen && compactFilters && startExpanded && effectiveViewMode === "enterprise";
+    const initialZoom = readableFullStructure
+      ? Math.min(Math.max(fitZoom, 0.42), 1)
+      : fitZoom;
+    const chartW = bounds.width * initialZoom;
+    const chartH = bounds.height * initialZoom;
 
-    setZoom(fitZoom);
-    setPan({
-      x: (containerW - chartW) / 2,
-      y: (containerH - chartH) / 2,
-    });
-  }, [allNodes, bounds]);
+    setZoom(initialZoom);
+    setPan(
+      readableFullStructure
+        ? {
+            x: 32 - PADDING * initialZoom,
+            y: Math.min(containerH * 0.34, 320) - PADDING * initialZoom,
+          }
+        : {
+            x: (containerW - chartW) / 2,
+            y: (containerH - chartH) / 2,
+          },
+    );
+  }, [allNodes, bounds, compactFilters, effectiveViewMode, fullscreen, startExpanded]);
 
   const fitToScreen = useCallback(() => {
     if (!containerRef.current) return;
@@ -2672,6 +2684,12 @@ export function OrgChart({
     "h-8 w-[9.5rem] justify-between bg-background/85 px-2 text-xs";
   const compactWideSelectTriggerClass =
     "h-8 w-[13rem] justify-between bg-background/85 px-2 text-xs";
+  const graphWorkspaceHeightClass =
+    fullscreen && compactFilters
+      ? "min-h-[760px] md:min-h-[920px] xl:min-h-[1040px]"
+      : fullscreen
+        ? "min-h-[78dvh]"
+        : "min-h-[440px]";
 
   return (
     <div className={cn("flex min-h-full flex-col gap-3", fullscreen && "h-auto")}>
@@ -3554,18 +3572,14 @@ export function OrgChart({
           </section>
         ) : null}
 
-        <div
-          className={cn(
-            "flex flex-1 flex-col gap-3 xl:flex-row",
-            fullscreen && "min-h-[78dvh]",
-          )}
-        >
+        <div className={cn("flex flex-1 flex-col gap-3 xl:flex-row", graphWorkspaceHeightClass)}>
           <div
             ref={containerRef}
             data-full-structure-graph
             className={cn(
               "relative min-w-0 flex-1 overflow-hidden border border-border/70 bg-gradient-to-br from-slate-100/70 via-background to-slate-200/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] dark:border-white/10 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900/90",
-              fullscreen ? "min-h-[78dvh] rounded-3xl" : "min-h-[440px] rounded-2xl",
+              graphWorkspaceHeightClass,
+              fullscreen ? "rounded-3xl" : "rounded-2xl",
             )}
             style={{ cursor: dragging ? "grabbing" : "grab" }}
             onMouseDown={handleMouseDown}
