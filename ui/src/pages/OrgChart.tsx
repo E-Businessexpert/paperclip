@@ -33,6 +33,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { EmptyState } from "../components/EmptyState";
 import { PageSkeleton } from "../components/PageSkeleton";
 import { AgentIcon } from "../components/AgentIconPicker";
@@ -95,6 +96,7 @@ interface OrgChartProps {
   lockViewMode?: OrgViewMode;
   startExpanded?: boolean;
   defaultInspectorMinimized?: boolean;
+  compactFilters?: boolean;
   showBackButton?: boolean;
   backHref?: string | null;
   title?: string;
@@ -220,6 +222,48 @@ interface WiringVisibilityState {
   showReportsToLines: boolean;
   showRelationshipLines: boolean;
 }
+
+const WIRING_VISIBILITY_OPTIONS: Array<{
+  key: keyof WiringVisibilityState;
+  label: string;
+  description: string;
+}> = [
+  {
+    key: "showCompanyContainers",
+    label: "Company boxes",
+    description: "Show or hide the company containers in the enterprise map.",
+  },
+  {
+    key: "showCompanyNames",
+    label: "Company names",
+    description: "Show or hide company labels in the chart and grouping shells.",
+  },
+  {
+    key: "showAgents",
+    label: "Agent cards",
+    description: "Show individual agents or collapse to company-to-company wiring.",
+  },
+  {
+    key: "showAgentNames",
+    label: "Agent names",
+    description: "Keep cards visible but hide personal labels and card detail.",
+  },
+  {
+    key: "showPermissions",
+    label: "Permissions",
+    description: "Show permission overlays inside the Wiring Inspector.",
+  },
+  {
+    key: "showReportsToLines",
+    label: "Reports-to lines",
+    description: "Show or hide formal hierarchy wiring between managers and reports.",
+  },
+  {
+    key: "showRelationshipLines",
+    label: "Relationship lines",
+    description: "Show or hide cross-functional wiring and enterprise relationships.",
+  },
+];
 
 interface CompanyOption {
   id: string;
@@ -1049,6 +1093,7 @@ export function OrgChart({
   lockViewMode,
   startExpanded = false,
   defaultInspectorMinimized = false,
+  compactFilters = false,
   showBackButton = false,
   backHref = null,
   title,
@@ -1087,7 +1132,9 @@ export function OrgChart({
   const [wiringVisibility, setWiringVisibility] = useState<WiringVisibilityState>(() =>
     createDefaultWiringVisibility(enterpriseScope, initialStoredViewMode, startExpanded),
   );
-  const [filtersOpen, setFiltersOpen] = useState(() => initialStoredViewMode === "enterprise");
+  const [filtersOpen, setFiltersOpen] = useState(
+    () => initialStoredViewMode === "enterprise" && !compactFilters,
+  );
   const [inspectorMinimized, setInspectorMinimized] = useState(defaultInspectorMinimized);
   const [collapsedNodeIds, setCollapsedNodeIds] = useState<Set<string>>(new Set());
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -1177,9 +1224,10 @@ export function OrgChart({
     setWiringVisibility(
       createDefaultWiringVisibility(enterpriseScope, effectiveViewMode, startExpanded),
     );
-    setFiltersOpen(effectiveViewMode === "enterprise");
+    setFiltersOpen(effectiveViewMode === "enterprise" && !compactFilters);
     setInspectorMinimized(defaultInspectorMinimized);
   }, [
+    compactFilters,
     defaultInspectorMinimized,
     enterpriseScope,
     effectiveViewMode,
@@ -2380,6 +2428,10 @@ export function OrgChart({
 
   const handleWheel = useCallback(
     (event: React.WheelEvent) => {
+      if (fullscreen && !event.ctrlKey && !event.metaKey) {
+        return;
+      }
+
       event.preventDefault();
       const container = containerRef.current;
       if (!container) return;
@@ -2397,7 +2449,7 @@ export function OrgChart({
       });
       setZoom(nextZoom);
     },
-    [pan, zoom],
+    [fullscreen, pan, zoom],
   );
 
   const handleViewModeChange = useCallback(
@@ -2616,6 +2668,11 @@ export function OrgChart({
     );
   }
 
+  const compactSelectTriggerClass =
+    "h-8 w-[9.5rem] justify-between bg-background/85 px-2 text-xs";
+  const compactWideSelectTriggerClass =
+    "h-8 w-[13rem] justify-between bg-background/85 px-2 text-xs";
+
   return (
     <div className={cn("flex min-h-full flex-col gap-3", fullscreen && "h-auto")}>
       {showBackButton ? (
@@ -2702,14 +2759,307 @@ export function OrgChart({
       {effectiveViewMode === "enterprise" && enterpriseGraph ? (
         <>
           <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-2xl border border-border/70 bg-gradient-to-r from-card/95 via-card/88 to-muted/45 px-3 py-3 shadow-sm dark:border-white/10 dark:from-slate-950/88 dark:via-slate-950/78 dark:to-slate-900/68">
-            <Button
-              size="sm"
-              variant={filtersOpen ? "default" : "outline"}
-              onClick={() => setFiltersOpen((previous) => !previous)}
-            >
-              <SlidersHorizontal className="mr-1.5 h-3.5 w-3.5" />
-              {filtersOpen ? "Hide filters" : "Show filters"}
-            </Button>
+            {compactFilters ? (
+              <>
+                <div
+                  data-full-structure-filters
+                  className="flex min-w-[min(100%,42rem)] flex-1 items-center gap-1 overflow-x-auto rounded-xl border border-border/70 bg-background/75 p-1 shadow-inner dark:border-white/10 dark:bg-slate-950/60"
+                  aria-label="Enterprise filter toolbar"
+                >
+                  <span className="shrink-0 rounded-lg bg-muted/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                    Filters
+                  </span>
+
+                  <Select value={companyAFilter} onValueChange={setCompanyAFilter}>
+                    <SelectTrigger className={compactWideSelectTriggerClass}>
+                      <SelectValue placeholder="Company A" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={ALL_COMPANIES_FILTER}>Any company A</SelectItem>
+                      {companyOptions.map((option) => (
+                        <SelectItem key={`compact-company-a:${option.id}`} value={option.id}>
+                          {option.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select value={relationshipDirectionFilter} onValueChange={(value) => setRelationshipDirectionFilter(value as RelationshipDirectionFilter)}>
+                    <SelectTrigger className={compactSelectTriggerClass}>
+                      <SelectValue placeholder="Direction" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="both">Both directions</SelectItem>
+                      <SelectItem value="downstream">Top-down only</SelectItem>
+                      <SelectItem value="upstream">Bottom-up only</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  <Select value={companyBFilter} onValueChange={setCompanyBFilter}>
+                    <SelectTrigger className={compactWideSelectTriggerClass}>
+                      <SelectValue placeholder="Company B" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={ALL_COMPANIES_FILTER}>Any company B</SelectItem>
+                      {companyOptions.map((option) => (
+                        <SelectItem key={`compact-company-b:${option.id}`} value={option.id}>
+                          {option.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select
+                    value={relationshipCategoryFilter}
+                    onValueChange={(value) =>
+                      setRelationshipCategoryFilter(value as EnterpriseRelationshipCategory | "all")
+                    }
+                  >
+                    <SelectTrigger className={compactSelectTriggerClass}>
+                      <SelectValue placeholder="Relationship" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All relationships</SelectItem>
+                      {relationshipCategories.map((category) => (
+                        <SelectItem key={`compact-relationship:${category}`} value={category}>
+                          {relationshipCategoryLabels[category]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select value={levelFilter} onValueChange={(value) => setLevelFilter(value as EnterpriseLevelFilter)}>
+                    <SelectTrigger className={compactSelectTriggerClass}>
+                      <SelectValue placeholder="Level" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(levelFilterLabels).map(([value, label]) => (
+                        <SelectItem key={`compact-level:${value}`} value={value}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select value={rootFilter} onValueChange={(value) => setRootFilter(value as EnterpriseRootFilter)}>
+                    <SelectTrigger className={compactSelectTriggerClass}>
+                      <SelectValue placeholder="Roots" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(rootFilterLabels).map(([value, label]) => (
+                        <SelectItem key={`compact-root:${value}`} value={value}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select
+                    value={statusFilter}
+                    onValueChange={(value) => setStatusFilter(value as EnterpriseGraphNode["status"] | "all")}
+                  >
+                    <SelectTrigger className={compactSelectTriggerClass}>
+                      <SelectValue placeholder="Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Any status</SelectItem>
+                      {statusOptions.map((status) => (
+                        <SelectItem key={`compact-status:${status}`} value={status}>
+                          {status}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select
+                    value={roleFilter}
+                    onValueChange={(value) => setRoleFilter(value as EnterpriseGraphNode["role"] | "all")}
+                  >
+                    <SelectTrigger className={compactSelectTriggerClass}>
+                      <SelectValue placeholder="Role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Any role</SelectItem>
+                      {roleOptions.map((role) => (
+                        <SelectItem key={`compact-role:${role}`} value={role}>
+                          {roleLabel(role)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select value={adapterFilter} onValueChange={setAdapterFilter}>
+                    <SelectTrigger className={compactSelectTriggerClass}>
+                      <SelectValue placeholder="Adapter" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Any adapter</SelectItem>
+                      {adapterOptions.map((adapter) => (
+                        <SelectItem key={`compact-adapter:${adapter}`} value={adapter}>
+                          {getAdapterLabel(adapter)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select value={permissionFilter} onValueChange={(value) => setPermissionFilter(value as EnterprisePermissionFilter)}>
+                    <SelectTrigger className={compactWideSelectTriggerClass}>
+                      <SelectValue placeholder="Permissions" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Any permissions</SelectItem>
+                      <SelectItem value="any">Any elevated permission</SelectItem>
+                      {inspectorPermissionDescriptors.map((descriptor) => (
+                        <SelectItem key={`compact-permission:${descriptor.key}`} value={descriptor.key}>
+                          {descriptor.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select value={metadataFilter} onValueChange={(value) => setMetadataFilter(value as EnterpriseMetadataFilter)}>
+                    <SelectTrigger className={compactWideSelectTriggerClass}>
+                      <SelectValue placeholder="Metadata" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(metadataFilterLabels).map(([value, label]) => (
+                        <SelectItem key={`compact-metadata:${value}`} value={value}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select value={archivedFilter} onValueChange={(value) => setArchivedFilter(value as EnterpriseArchivedFilter)}>
+                    <SelectTrigger className={compactWideSelectTriggerClass}>
+                      <SelectValue placeholder="Archived" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(archivedFilterLabels).map(([value, label]) => (
+                        <SelectItem key={`compact-archived:${value}`} value={value}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select value={errorFilter} onValueChange={(value) => setErrorFilter(value as EnterpriseErrorFilter)}>
+                    <SelectTrigger className={compactSelectTriggerClass}>
+                      <SelectValue placeholder="Errors" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(errorFilterLabels).map(([value, label]) => (
+                        <SelectItem key={`compact-error:${value}`} value={value}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select value={crossCompanyFilter} onValueChange={(value) => setCrossCompanyFilter(value as EnterpriseCrossCompanyFilter)}>
+                    <SelectTrigger className={compactWideSelectTriggerClass}>
+                      <SelectValue placeholder="Link scope" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(crossCompanyFilterLabels).map(([value, label]) => (
+                        <SelectItem key={`compact-scope:${value}`} value={value}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <Popover open={filtersOpen} onOpenChange={setFiltersOpen}>
+                  <PopoverTrigger asChild>
+                    <Button size="sm" variant={filtersOpen ? "default" : "outline"}>
+                      <SlidersHorizontal className="mr-1.5 h-3.5 w-3.5" />
+                      Layers
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    align="end"
+                    className="max-h-[min(70dvh,520px)] w-[min(92vw,380px)] overflow-y-auto p-3"
+                  >
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                      Visibility
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      {WIRING_VISIBILITY_OPTIONS.map((item) => {
+                        const checked = wiringVisibility[item.key];
+                        return (
+                          <label
+                            key={`compact-${item.key}`}
+                            className="flex items-start gap-3 rounded-xl border border-border/70 bg-background/70 px-3 py-2 dark:border-white/10 dark:bg-slate-950/65"
+                          >
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={(nextChecked) =>
+                                handleWiringVisibilityChange(item.key, nextChecked === true)
+                              }
+                              className="mt-0.5"
+                            />
+                            <span className="min-w-0">
+                              <span className="block text-[12px] font-medium text-foreground">
+                                {item.label}
+                              </span>
+                              <span className="mt-0.5 block text-[10px] leading-relaxed text-muted-foreground">
+                                {item.description}
+                              </span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2 border-t border-border/70 pt-3 dark:border-white/10">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          setWiringVisibility({
+                            showCompanyContainers: true,
+                            showCompanyNames: true,
+                            showAgents: false,
+                            showAgentNames: false,
+                            showPermissions: false,
+                            showReportsToLines: true,
+                            showRelationshipLines: true,
+                          })
+                        }
+                      >
+                        Companies only
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          setWiringVisibility({
+                            showCompanyContainers: true,
+                            showCompanyNames: true,
+                            showAgents: true,
+                            showAgentNames: true,
+                            showPermissions: true,
+                            showReportsToLines: true,
+                            showRelationshipLines: true,
+                          })
+                        }
+                      >
+                        Full detail
+                      </Button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </>
+            ) : (
+              <Button
+                size="sm"
+                variant={filtersOpen ? "default" : "outline"}
+                onClick={() => setFiltersOpen((previous) => !previous)}
+              >
+                <SlidersHorizontal className="mr-1.5 h-3.5 w-3.5" />
+                {filtersOpen ? "Hide filters" : "Show filters"}
+              </Button>
+            )}
             <Button
               size="sm"
               variant="outline"
@@ -2780,7 +3130,7 @@ export function OrgChart({
       ) : null}
 
       <div className="flex flex-1 flex-col gap-3">
-        {effectiveViewMode === "enterprise" && filtersOpen ? (
+        {effectiveViewMode === "enterprise" && filtersOpen && !compactFilters ? (
           <section
             data-full-structure-filters
             className="flex shrink-0 flex-col rounded-2xl border border-border/70 bg-gradient-to-br from-card/95 via-card/90 to-muted/50 p-3 shadow-sm dark:border-white/10 dark:from-slate-950/90 dark:via-slate-950/84 dark:to-slate-900/74"
@@ -3125,44 +3475,8 @@ export function OrgChart({
                 </div>
 
                 <div className="mt-3 space-y-2.5">
-                  {[
-                    {
-                      key: "showCompanyContainers",
-                      label: "Company boxes",
-                      description: "Show or hide the company containers in the enterprise map.",
-                    },
-                    {
-                      key: "showCompanyNames",
-                      label: "Company names",
-                      description: "Show or hide company labels in the chart and grouping shells.",
-                    },
-                    {
-                      key: "showAgents",
-                      label: "Agent cards",
-                      description: "Show individual agents or collapse to company-to-company wiring.",
-                    },
-                    {
-                      key: "showAgentNames",
-                      label: "Agent names",
-                      description: "Keep cards visible but hide personal labels and card detail.",
-                    },
-                    {
-                      key: "showPermissions",
-                      label: "Permissions",
-                      description: "Show permission overlays inside the Wiring Inspector.",
-                    },
-                    {
-                      key: "showReportsToLines",
-                      label: "Reports-to lines",
-                      description: "Show or hide formal hierarchy wiring between managers and reports.",
-                    },
-                    {
-                      key: "showRelationshipLines",
-                      label: "Relationship lines",
-                      description: "Show or hide cross-functional wiring and enterprise relationships.",
-                    },
-                  ].map((item) => {
-                    const checked = wiringVisibility[item.key as keyof WiringVisibilityState];
+                  {WIRING_VISIBILITY_OPTIONS.map((item) => {
+                    const checked = wiringVisibility[item.key];
                     return (
                       <label
                         key={item.key}
@@ -3172,7 +3486,7 @@ export function OrgChart({
                           checked={checked}
                           onCheckedChange={(nextChecked) =>
                             handleWiringVisibilityChange(
-                              item.key as keyof WiringVisibilityState,
+                              item.key,
                               nextChecked === true,
                             )
                           }

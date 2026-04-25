@@ -56,13 +56,14 @@ export function FullStructurePage() {
       : "/dashboard";
 
   return (
-    <div className="min-h-[100dvh] overflow-y-auto bg-background p-3 md:p-5">
+    <div className="h-[100dvh] overflow-y-auto overscroll-contain bg-background p-3 md:p-5">
       <OrgChart
         fullscreen
         initialViewMode="enterprise"
         lockViewMode="enterprise"
         startExpanded
         defaultInspectorMinimized
+        compactFilters
         enterpriseScope="family"
         showBackButton
         backHref={backTo}
