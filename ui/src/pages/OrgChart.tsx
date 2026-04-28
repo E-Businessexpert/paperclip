@@ -2250,7 +2250,7 @@ export function OrgChart({
       readableFullStructure
         ? {
             x: 32 - PADDING * initialZoom,
-            y: Math.min(containerH * 0.34, 320) - PADDING * initialZoom,
+            y: Math.min(containerH * 0.16, 150) - PADDING * initialZoom,
           }
         : {
             x: (containerW - chartW) / 2,
