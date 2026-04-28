@@ -991,11 +991,11 @@ function pickGroupAccent(
   companyId?: string,
   companyAccentById?: ReadonlyMap<string, string>,
 ) {
-  if (external) return "#f59e0b";
   if (companyId) {
     const companyAccent = companyAccentById?.get(companyId);
     if (companyAccent) return companyAccent;
   }
+  if (external) return "#f59e0b";
   if (selectedCompanyId && companyId === selectedCompanyId) return "#38bdf8";
   return COMPANY_ACCENTS[hashString(key) % COMPANY_ACCENTS.length] ?? "#60a5fa";
 }
