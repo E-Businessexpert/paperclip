@@ -2241,9 +2241,7 @@ export function OrgChart({
     const fitZoom = Math.min(scaleX, scaleY, 1);
     const readableFullStructure =
       fullscreen && compactFilters && startExpanded && effectiveViewMode === "enterprise";
-    const initialZoom = readableFullStructure
-      ? Math.min(Math.max(fitZoom, 0.42), 1)
-      : fitZoom;
+    const initialZoom = readableFullStructure ? 1 : fitZoom;
     const chartW = bounds.width * initialZoom;
     const chartH = bounds.height * initialZoom;
 
