@@ -468,6 +468,25 @@ const crossCompanyFilterLabels: Record<EnterpriseCrossCompanyFilter, string> = {
   internalOnly: "Internal only",
 };
 
+function ColorDot({ color, className }: { color: string; className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn("inline-block h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-white/20", className)}
+      style={{ backgroundColor: color }}
+    />
+  );
+}
+
+function ColorLabel({ color, label }: { color: string; label: string }) {
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1.5">
+      <ColorDot color={color} />
+      <span className="truncate">{label}</span>
+    </span>
+  );
+}
+
 const inspectorPermissionDescriptors: readonly PermissionDescriptor[] = [
   {
     key: "canCreateAgents",
@@ -1525,6 +1544,24 @@ export function OrgChart({
   const companyGroupsMap = useMemo(
     () => new Map(companyGroups.map((group) => [group.key, group])),
     [companyGroups],
+  );
+  const companyLegendItems = useMemo(
+    () =>
+      companyOptions.map((option) => {
+        const groupKey = companyGroupKey(option.id, option.name);
+        const graphGroup = companyGroupsMap.get(groupKey);
+        return {
+          ...option,
+          color:
+            graphGroup?.accentColor ??
+            pickGroupAccent(groupKey, false, selectedCompanyId ?? undefined, option.id),
+        };
+      }),
+    [companyGroupsMap, companyOptions, selectedCompanyId],
+  );
+  const companyLegendColorById = useMemo(
+    () => new Map(companyLegendItems.map((item) => [item.id, item.color])),
+    [companyLegendItems],
   );
   const companyScopedFilterActive =
     companyAFilter !== ALL_COMPANIES_FILTER || companyBFilter !== ALL_COMPANIES_FILTER;
@@ -2794,7 +2831,10 @@ export function OrgChart({
                       <SelectItem value={ALL_COMPANIES_FILTER}>Any company A</SelectItem>
                       {companyOptions.map((option) => (
                         <SelectItem key={`compact-company-a:${option.id}`} value={option.id}>
-                          {option.name}
+                          <ColorLabel
+                            color={companyLegendColorById.get(option.id) ?? defaultDotColor}
+                            label={option.name}
+                          />
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -2819,7 +2859,10 @@ export function OrgChart({
                       <SelectItem value={ALL_COMPANIES_FILTER}>Any company B</SelectItem>
                       {companyOptions.map((option) => (
                         <SelectItem key={`compact-company-b:${option.id}`} value={option.id}>
-                          {option.name}
+                          <ColorLabel
+                            color={companyLegendColorById.get(option.id) ?? defaultDotColor}
+                            label={option.name}
+                          />
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -2838,7 +2881,10 @@ export function OrgChart({
                       <SelectItem value="all">All relationships</SelectItem>
                       {relationshipCategories.map((category) => (
                         <SelectItem key={`compact-relationship:${category}`} value={category}>
-                          {relationshipCategoryLabels[category]}
+                          <ColorLabel
+                            color={relationshipCategoryStroke[category]}
+                            label={relationshipCategoryLabels[category]}
+                          />
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -2881,7 +2927,7 @@ export function OrgChart({
                       <SelectItem value="all">Any status</SelectItem>
                       {statusOptions.map((status) => (
                         <SelectItem key={`compact-status:${status}`} value={status}>
-                          {status}
+                          <ColorLabel color={statusDotColor[status] ?? defaultDotColor} label={status} />
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -2927,7 +2973,7 @@ export function OrgChart({
                       <SelectItem value="any">Any elevated permission</SelectItem>
                       {inspectorPermissionDescriptors.map((descriptor) => (
                         <SelectItem key={`compact-permission:${descriptor.key}`} value={descriptor.key}>
-                          {descriptor.label}
+                          <ColorLabel color={descriptor.color} label={descriptor.label} />
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -2984,6 +3030,56 @@ export function OrgChart({
                       ))}
                     </SelectContent>
                   </Select>
+                </div>
+
+                <div
+                  data-full-structure-color-key
+                  className="order-last flex w-full items-center gap-2 overflow-x-auto rounded-xl border border-border/60 bg-background/55 px-2 py-1.5 text-[11px] shadow-inner dark:border-white/10 dark:bg-slate-950/45"
+                  aria-label="Graph color key"
+                >
+                  <span className="shrink-0 rounded-md bg-muted/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                    Color key
+                  </span>
+                  <span className="shrink-0 text-muted-foreground">Companies</span>
+                  {companyLegendItems.map((item) => (
+                    <span
+                      key={`compact-company-color:${item.id}`}
+                      data-company-color-key={item.id}
+                      data-color={item.color}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border/65 bg-card/70 px-2 py-0.5 text-foreground/85 dark:border-white/10 dark:bg-slate-950/65"
+                    >
+                      <ColorDot color={item.color} className="h-2 w-2" />
+                      <span className="max-w-[11rem] truncate">{item.name}</span>
+                    </span>
+                  ))}
+                  <span className="ml-1 shrink-0 text-muted-foreground">Lines</span>
+                  <span
+                    data-line-color-key="reports-to"
+                    data-color={DEFAULT_EDGE_STROKE}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border/65 bg-card/70 px-2 py-0.5 text-foreground/85 dark:border-white/10 dark:bg-slate-950/65"
+                  >
+                    <ColorDot color={DEFAULT_EDGE_STROKE} className="h-2 w-2" />
+                    Reports-to
+                  </span>
+                  <span
+                    data-line-color-key="cross-company"
+                    data-color={CROSS_COMPANY_STROKE}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border/65 bg-card/70 px-2 py-0.5 text-foreground/85 dark:border-white/10 dark:bg-slate-950/65"
+                  >
+                    <ColorDot color={CROSS_COMPANY_STROKE} className="h-2 w-2" />
+                    Cross-company
+                  </span>
+                  {relationshipCategories.map((category) => (
+                    <span
+                      key={`compact-relationship-color:${category}`}
+                      data-relationship-color-key={category}
+                      data-color={relationshipCategoryStroke[category]}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border/65 bg-card/70 px-2 py-0.5 text-foreground/85 dark:border-white/10 dark:bg-slate-950/65"
+                    >
+                      <ColorDot color={relationshipCategoryStroke[category]} className="h-2 w-2" />
+                      {relationshipCategoryLabels[category]}
+                    </span>
+                  ))}
                 </div>
 
                 <Popover open={filtersOpen} onOpenChange={setFiltersOpen}>
@@ -3914,6 +4010,7 @@ export function OrgChart({
                     <div
                       key={node.id}
                       data-org-card
+                      data-collapsed={node.collapsed ? "true" : "false"}
                       className={cn(
                         "absolute cursor-pointer select-none overflow-hidden rounded-2xl border bg-gradient-to-br from-card/95 via-card to-muted/40 shadow-[0_18px_35px_-24px_rgba(15,23,42,0.55)] transition-[box-shadow,border-color,transform,opacity] duration-150 hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-[0_24px_50px_-28px_rgba(15,23,42,0.7)] dark:from-slate-950/92 dark:via-slate-950/88 dark:to-slate-900/72",
                         isFocusedAgent
