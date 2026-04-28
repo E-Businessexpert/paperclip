@@ -69,9 +69,27 @@ const COMPANY_TREE_CARD_H = 116;
 const COMPANY_TREE_GAP_X = 52;
 const COMPANY_TREE_GAP_Y = 108;
 const ORG_VIEW_MODE_STORAGE_KEY = "paperclip.orgChart.viewMode";
+const COLLAPSED_NODE_IDS_STORAGE_PREFIX = "paperclip.orgChart.collapsedNodeIds";
 const CROSS_COMPANY_STROKE = "#ef4444";
 const DEFAULT_EDGE_STROKE = "rgba(148, 163, 184, 0.55)";
-const GROUP_ACCENTS = ["#38bdf8", "#60a5fa", "#34d399", "#f59e0b", "#a78bfa", "#f472b6"];
+const COMPANY_ACCENTS = [
+  "#38bdf8",
+  "#f59e0b",
+  "#34d399",
+  "#a78bfa",
+  "#f472b6",
+  "#22c55e",
+  "#fb7185",
+  "#14b8a6",
+  "#eab308",
+  "#818cf8",
+  "#f97316",
+  "#06b6d4",
+  "#84cc16",
+  "#d946ef",
+];
+const GRAPH_MIN_ZOOM = 0.2;
+const GRAPH_MAX_ZOOM = 2.4;
 const ALL_COMPANIES_FILTER = "__all_companies__";
 
 type OrgViewMode = "hierarchy" | "enterprise";
@@ -487,6 +505,20 @@ function ColorLabel({ color, label }: { color: string; label: string }) {
   );
 }
 
+function colorWithAlpha(color: string, alphaHex: string): string {
+  return color.startsWith("#") ? `${color}${alphaHex}` : color;
+}
+
+function colorSurfaceStyle(color?: string | null): React.CSSProperties | undefined {
+  if (!color) return undefined;
+
+  return {
+    backgroundColor: colorWithAlpha(color, "22"),
+    borderColor: colorWithAlpha(color, "88"),
+    boxShadow: `inset 0 0 0 1px ${colorWithAlpha(color, "33")}`,
+  };
+}
+
 const inspectorPermissionDescriptors: readonly PermissionDescriptor[] = [
   {
     key: "canCreateAgents",
@@ -573,6 +605,64 @@ function persistOrgViewMode(nextViewMode: OrgViewMode) {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(ORG_VIEW_MODE_STORAGE_KEY, nextViewMode);
+  } catch {
+    // Ignore storage failures in restricted environments.
+  }
+}
+
+function buildCollapsedNodeIdsStorageKey(
+  selectedCompanyId: string,
+  enterpriseScope: EnterpriseGraphScopeMode,
+  viewMode: OrgViewMode,
+): string {
+  return `${COLLAPSED_NODE_IDS_STORAGE_PREFIX}:${enterpriseScope}:${viewMode}:${selectedCompanyId}`;
+}
+
+function collectOrgNodeIds(roots: OrgNode[]): Set<string> {
+  const ids = new Set<string>();
+  const visit = (node: OrgNode) => {
+    ids.add(node.id);
+    node.reports.forEach(visit);
+  };
+
+  roots.forEach(visit);
+  return ids;
+}
+
+function readStoredCollapsedNodeIds(
+  storageKey: string | null,
+  validNodeIds: ReadonlySet<string>,
+): Set<string> | null {
+  if (!storageKey || typeof window === "undefined") return null;
+
+  try {
+    const stored = window.localStorage.getItem(storageKey);
+    if (!stored) return null;
+
+    const parsed = JSON.parse(stored) as { nodeIds?: unknown };
+    if (!Array.isArray(parsed.nodeIds)) return null;
+
+    return new Set(
+      parsed.nodeIds.filter(
+        (nodeId): nodeId is string => typeof nodeId === "string" && validNodeIds.has(nodeId),
+      ),
+    );
+  } catch {
+    return null;
+  }
+}
+
+function persistStoredCollapsedNodeIds(storageKey: string | null, collapsedNodeIds: ReadonlySet<string>) {
+  if (!storageKey || typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        version: 1,
+        nodeIds: Array.from(collapsedNodeIds),
+      }),
+    );
   } catch {
     // Ignore storage failures in restricted environments.
   }
@@ -894,15 +984,26 @@ function hashString(value: string): number {
   return hash;
 }
 
-function pickGroupAccent(key: string, external: boolean, selectedCompanyId?: string, companyId?: string) {
+function pickGroupAccent(
+  key: string,
+  external: boolean,
+  selectedCompanyId?: string,
+  companyId?: string,
+  companyAccentById?: ReadonlyMap<string, string>,
+) {
   if (external) return "#f59e0b";
+  if (companyId) {
+    const companyAccent = companyAccentById?.get(companyId);
+    if (companyAccent) return companyAccent;
+  }
   if (selectedCompanyId && companyId === selectedCompanyId) return "#38bdf8";
-  return GROUP_ACCENTS[hashString(key) % GROUP_ACCENTS.length] ?? "#60a5fa";
+  return COMPANY_ACCENTS[hashString(key) % COMPANY_ACCENTS.length] ?? "#60a5fa";
 }
 
 function buildCompanyGroups(
   nodes: LayoutNode[],
   selectedCompanyId?: string | null,
+  companyAccentById?: ReadonlyMap<string, string>,
 ): CompanyGroup[] {
   const groups = new Map<
     string,
@@ -961,7 +1062,13 @@ function buildCompanyGroups(
         group.maxY - group.minY + COMPANY_GROUP_PADDING_Y * 2 + COMPANY_GROUP_HEADER_H,
       nodeCount: group.nodeCount,
       external: group.external,
-      accentColor: pickGroupAccent(key, group.external, selectedCompanyId ?? undefined, group.companyId),
+      accentColor: pickGroupAccent(
+        key,
+        group.external,
+        selectedCompanyId ?? undefined,
+        group.companyId,
+        companyAccentById,
+      ),
     }))
     .sort((left, right) => (left.y === right.y ? left.x - right.x : left.y - right.y));
 }
@@ -970,6 +1077,7 @@ function buildCompanyHierarchyGroups(
   companies: Company[],
   nodes: EnterpriseGraphNode[],
   selectedCompanyId?: string | null,
+  companyAccentById?: ReadonlyMap<string, string>,
 ): CompanyGroup[] {
   const companyById = new Map(companies.map((company) => [company.id, company]));
   const relevantCompanyIds = new Set<string>();
@@ -1055,7 +1163,13 @@ function buildCompanyHierarchyGroups(
       height: COMPANY_TREE_CARD_H,
       nodeCount: companyAgentCounts.get(company.id) ?? 0,
       external: false,
-      accentColor: pickGroupAccent(key, false, selectedCompanyId ?? undefined, company.id),
+      accentColor: pickGroupAccent(
+        key,
+        false,
+        selectedCompanyId ?? undefined,
+        company.id,
+        companyAccentById,
+      ),
     });
 
     const children = childrenByParentId.get(company.id) ?? [];
@@ -1097,7 +1211,13 @@ function buildCompanyHierarchyGroups(
           height: COMPANY_TREE_CARD_H,
           nodeCount: count,
           external: true,
-          accentColor: pickGroupAccent(key, true, selectedCompanyId ?? undefined, undefined),
+          accentColor: pickGroupAccent(
+            key,
+            true,
+            selectedCompanyId ?? undefined,
+            undefined,
+            companyAccentById,
+          ),
         });
         externalLeft += COMPANY_TREE_CARD_W + COMPANY_TREE_GAP_X;
       });
@@ -1126,6 +1246,7 @@ export function OrgChart({
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const dragStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
   const hasInitialized = useRef(false);
+  const hasInitializedCollapseState = useRef(false);
   const initialStoredViewMode = lockViewMode ?? readStoredOrgViewMode(initialViewMode);
 
   const [viewMode, setViewMode] = useState<OrgViewMode>(() => initialStoredViewMode);
@@ -1167,6 +1288,10 @@ export function OrgChart({
 
   const chartAccent = selectedCompany?.brandColor ?? "#60a5fa";
   const effectiveViewMode = lockViewMode ?? viewMode;
+  const collapseStateStorageKey =
+    fullscreen && compactFilters && startExpanded && selectedCompanyId
+      ? buildCollapsedNodeIdsStorageKey(selectedCompanyId, enterpriseScope, effectiveViewMode)
+      : null;
   const pageTitle = title ?? (fullscreen ? "Full Structure" : "Org Chart");
   const pageSubtitle =
     subtitle ??
@@ -1218,7 +1343,8 @@ export function OrgChart({
 
   useEffect(() => {
     hasInitialized.current = false;
-  }, [selectedCompanyId, effectiveViewMode]);
+    hasInitializedCollapseState.current = false;
+  }, [collapseStateStorageKey, effectiveViewMode, enterpriseScope, selectedCompanyId]);
 
   useEffect(() => {
     setFocusTarget(null);
@@ -1336,6 +1462,18 @@ export function OrgChart({
 
     return options.sort((left, right) => left.name.localeCompare(right.name));
   }, [companies, enterpriseGraph]);
+  const companyAccentById = useMemo(
+    () =>
+      new Map(
+        [...companies]
+          .sort((left, right) => left.name.localeCompare(right.name))
+          .map<[string, string]>((company, index) => [
+            company.id,
+            COMPANY_ACCENTS[index % COMPANY_ACCENTS.length] ?? "#60a5fa",
+          ]),
+      ),
+    [companies],
+  );
   const companyStatusById = useMemo(
     () => new Map(companies.map((company) => [company.id, company.status])),
     [companies],
@@ -1401,23 +1539,48 @@ export function OrgChart({
   const childCountMap = useMemo(() => buildChildCountMap(rawRoots), [rawRoots]);
 
   useEffect(() => {
-    if (startExpanded) {
+    if (hasInitializedCollapseState.current || rawRoots.length === 0) return;
+
+    hasInitializedCollapseState.current = true;
+    const storedCollapsedNodeIds = readStoredCollapsedNodeIds(
+      collapseStateStorageKey,
+      collectOrgNodeIds(rawRoots),
+    );
+
+    if (storedCollapsedNodeIds) {
+      setCollapsedNodeIds(storedCollapsedNodeIds);
+    } else if (startExpanded) {
+      setCollapsedNodeIds(new Set());
+    } else if (fullscreen && effectiveViewMode === "hierarchy") {
+      setCollapsedNodeIds(buildRootPreviewCollapsedNodeIds(rawRoots));
+    } else if (fullscreen && effectiveViewMode === "enterprise" && enterpriseScope === "family") {
+      setCollapsedNodeIds(buildEnterprisePreviewCollapsedNodeIds(rawRoots));
+    } else {
+      setCollapsedNodeIds(new Set());
+    }
+  }, [
+    collapseStateStorageKey,
+    effectiveViewMode,
+    enterpriseScope,
+    fullscreen,
+    rawRoots,
+    startExpanded,
+  ]);
+
+  useEffect(() => {
+    if (rawRoots.length === 0) {
       setCollapsedNodeIds(new Set());
       return;
     }
 
-    if (fullscreen && effectiveViewMode === "hierarchy") {
-      setCollapsedNodeIds(buildRootPreviewCollapsedNodeIds(rawRoots));
-      return;
-    }
-
-    if (fullscreen && effectiveViewMode === "enterprise" && enterpriseScope === "family") {
-      setCollapsedNodeIds(buildEnterprisePreviewCollapsedNodeIds(rawRoots));
-      return;
-    }
-
-    setCollapsedNodeIds(new Set());
-  }, [effectiveViewMode, enterpriseScope, fullscreen, rawRoots, selectedCompanyId, startExpanded]);
+    const validNodeIds = collectOrgNodeIds(rawRoots);
+    setCollapsedNodeIds((previous) => {
+      const next = new Set(
+        Array.from(previous).filter((nodeId) => validNodeIds.has(nodeId)),
+      );
+      return next.size === previous.size ? previous : next;
+    });
+  }, [rawRoots]);
 
   const activeRoots = useMemo(
     () => rawRoots.map((root) => applyCollapsedReports(root, collapsedNodeIds)),
@@ -1536,10 +1699,23 @@ export function OrgChart({
     () =>
       effectiveViewMode === "enterprise"
         ? wiringVisibility.showAgents
-          ? buildCompanyGroups(allNodes, selectedCompanyId)
-          : buildCompanyHierarchyGroups(companies, enterpriseGraph?.nodes ?? [], selectedCompanyId)
+          ? buildCompanyGroups(allNodes, selectedCompanyId, companyAccentById)
+          : buildCompanyHierarchyGroups(
+              companies,
+              enterpriseGraph?.nodes ?? [],
+              selectedCompanyId,
+              companyAccentById,
+            )
         : [],
-    [allNodes, companies, effectiveViewMode, enterpriseGraph, selectedCompanyId, wiringVisibility.showAgents],
+    [
+      allNodes,
+      companies,
+      companyAccentById,
+      effectiveViewMode,
+      enterpriseGraph,
+      selectedCompanyId,
+      wiringVisibility.showAgents,
+    ],
   );
   const companyGroupsMap = useMemo(
     () => new Map(companyGroups.map((group) => [group.key, group])),
@@ -1554,10 +1730,16 @@ export function OrgChart({
           ...option,
           color:
             graphGroup?.accentColor ??
-            pickGroupAccent(groupKey, false, selectedCompanyId ?? undefined, option.id),
+            pickGroupAccent(
+              groupKey,
+              false,
+              selectedCompanyId ?? undefined,
+              option.id,
+              companyAccentById,
+            ),
         };
       }),
-    [companyGroupsMap, companyOptions, selectedCompanyId],
+    [companyAccentById, companyGroupsMap, companyOptions, selectedCompanyId],
   );
   const companyLegendColorById = useMemo(
     () => new Map(companyLegendItems.map((item) => [item.id, item.color])),
@@ -2474,12 +2656,13 @@ export function OrgChart({
   }, []);
 
   const handleWheel = useCallback(
-    (event: React.WheelEvent) => {
+    (event: WheelEvent) => {
       if (fullscreen && !event.ctrlKey && !event.metaKey) {
         return;
       }
 
       event.preventDefault();
+      event.stopPropagation();
       const container = containerRef.current;
       if (!container) return;
 
@@ -2487,7 +2670,7 @@ export function OrgChart({
       const mouseX = event.clientX - rect.left;
       const mouseY = event.clientY - rect.top;
       const factor = event.deltaY < 0 ? 1.1 : 0.9;
-      const nextZoom = Math.min(Math.max(zoom * factor, 0.2), 2);
+      const nextZoom = Math.min(Math.max(zoom * factor, GRAPH_MIN_ZOOM), GRAPH_MAX_ZOOM);
       const scale = nextZoom / zoom;
 
       setPan({
@@ -2498,6 +2681,14 @@ export function OrgChart({
     },
     [fullscreen, pan, zoom],
   );
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    container.addEventListener("wheel", handleWheel, { passive: false });
+    return () => container.removeEventListener("wheel", handleWheel);
+  }, [handleWheel]);
 
   const handleViewModeChange = useCallback(
     (nextViewMode: OrgViewMode) => {
@@ -2526,10 +2717,19 @@ export function OrgChart({
     setSelectedInspectorItem(null);
   }, [effectiveViewMode, enterpriseScope, startExpanded]);
 
+  const persistCollapsedNodeIdsForCurrentScope = useCallback(
+    (nextCollapsedNodeIds: ReadonlySet<string>) => {
+      persistStoredCollapsedNodeIds(collapseStateStorageKey, nextCollapsedNodeIds);
+    },
+    [collapseStateStorageKey],
+  );
+
   const expandGraphWorkspace = useCallback(() => {
     setFiltersOpen(false);
     setInspectorMinimized(true);
-    setCollapsedNodeIds(new Set());
+    const nextCollapsedNodeIds = new Set<string>();
+    setCollapsedNodeIds(nextCollapsedNodeIds);
+    persistCollapsedNodeIdsForCurrentScope(nextCollapsedNodeIds);
     setWiringVisibility({
       showCompanyContainers: true,
       showCompanyNames: true,
@@ -2545,7 +2745,7 @@ export function OrgChart({
     void graphElement.requestFullscreen().catch(() => {
       // Browser fullscreen can be blocked by policy; layout expansion still applies.
     });
-  }, []);
+  }, [persistCollapsedNodeIdsForCurrentScope]);
 
   const handleWiringVisibilityChange = useCallback(
     (key: keyof WiringVisibilityState, checked: boolean) => {
@@ -2584,9 +2784,10 @@ export function OrgChart({
       } else {
         next.add(nodeId);
       }
+      persistCollapsedNodeIdsForCurrentScope(next);
       return next;
     });
-  }, []);
+  }, [persistCollapsedNodeIdsForCurrentScope]);
 
   const zoomAroundCenter = useCallback(
     (nextZoom: number) => {
@@ -2716,9 +2917,45 @@ export function OrgChart({
   }
 
   const compactSelectTriggerClass =
-    "h-8 w-[9.5rem] justify-between bg-background/85 px-2 text-xs";
+    "h-8 w-[9.5rem] justify-between border-border/70 bg-background/85 px-2 text-xs";
   const compactWideSelectTriggerClass =
-    "h-8 w-[13rem] justify-between bg-background/85 px-2 text-xs";
+    "h-8 w-[13rem] justify-between border-border/70 bg-background/85 px-2 text-xs";
+  const companyAFilterColor =
+    companyAFilter === ALL_COMPANIES_FILTER
+      ? undefined
+      : companyLegendColorById.get(companyAFilter);
+  const companyBFilterColor =
+    companyBFilter === ALL_COMPANIES_FILTER
+      ? undefined
+      : companyLegendColorById.get(companyBFilter);
+  const relationshipFilterColor =
+    relationshipCategoryFilter === "all"
+      ? undefined
+      : relationshipCategoryStroke[relationshipCategoryFilter];
+  const statusFilterColor =
+    statusFilter === "all" ? undefined : statusDotColor[statusFilter] ?? defaultDotColor;
+  const permissionFilterColor =
+    permissionFilter === "all" || permissionFilter === "any"
+      ? undefined
+      : inspectorPermissionDescriptorMap.get(permissionFilter)?.color;
+  const metadataFilterColor =
+    metadataFilter === "serviceDiscovery"
+      ? inspectorPermissionDescriptorMap.get("canManageServiceDiscovery")?.color
+      : metadataFilter === "enterpriseRelationships"
+        ? inspectorPermissionDescriptorMap.get("canManageRelationshipTypes")?.color
+        : undefined;
+  const errorFilterColor =
+    errorFilter === "onlyErrors"
+      ? statusDotColor.error
+      : errorFilter === "excludeErrors"
+        ? statusDotColor.active
+        : undefined;
+  const crossCompanyFilterColor =
+    crossCompanyFilter === "onlyCrossCompany"
+      ? CROSS_COMPANY_STROKE
+      : crossCompanyFilter === "internalOnly"
+        ? DEFAULT_EDGE_STROKE
+        : undefined;
   const graphWorkspaceHeightClass =
     fullscreen && compactFilters
       ? "min-h-[760px] md:min-h-[920px] xl:min-h-[1040px]"
@@ -2824,13 +3061,21 @@ export function OrgChart({
                   </span>
 
                   <Select value={companyAFilter} onValueChange={setCompanyAFilter}>
-                    <SelectTrigger className={compactWideSelectTriggerClass}>
+                    <SelectTrigger
+                      className={compactWideSelectTriggerClass}
+                      data-filter-color={companyAFilterColor ?? ""}
+                      style={colorSurfaceStyle(companyAFilterColor)}
+                    >
                       <SelectValue placeholder="Company A" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value={ALL_COMPANIES_FILTER}>Any company A</SelectItem>
                       {companyOptions.map((option) => (
-                        <SelectItem key={`compact-company-a:${option.id}`} value={option.id}>
+                        <SelectItem
+                          key={`compact-company-a:${option.id}`}
+                          value={option.id}
+                          style={colorSurfaceStyle(companyLegendColorById.get(option.id))}
+                        >
                           <ColorLabel
                             color={companyLegendColorById.get(option.id) ?? defaultDotColor}
                             label={option.name}
@@ -2852,13 +3097,21 @@ export function OrgChart({
                   </Select>
 
                   <Select value={companyBFilter} onValueChange={setCompanyBFilter}>
-                    <SelectTrigger className={compactWideSelectTriggerClass}>
+                    <SelectTrigger
+                      className={compactWideSelectTriggerClass}
+                      data-filter-color={companyBFilterColor ?? ""}
+                      style={colorSurfaceStyle(companyBFilterColor)}
+                    >
                       <SelectValue placeholder="Company B" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value={ALL_COMPANIES_FILTER}>Any company B</SelectItem>
                       {companyOptions.map((option) => (
-                        <SelectItem key={`compact-company-b:${option.id}`} value={option.id}>
+                        <SelectItem
+                          key={`compact-company-b:${option.id}`}
+                          value={option.id}
+                          style={colorSurfaceStyle(companyLegendColorById.get(option.id))}
+                        >
                           <ColorLabel
                             color={companyLegendColorById.get(option.id) ?? defaultDotColor}
                             label={option.name}
@@ -2874,13 +3127,21 @@ export function OrgChart({
                       setRelationshipCategoryFilter(value as EnterpriseRelationshipCategory | "all")
                     }
                   >
-                    <SelectTrigger className={compactSelectTriggerClass}>
+                    <SelectTrigger
+                      className={compactSelectTriggerClass}
+                      data-filter-color={relationshipFilterColor ?? ""}
+                      style={colorSurfaceStyle(relationshipFilterColor)}
+                    >
                       <SelectValue placeholder="Relationship" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All relationships</SelectItem>
                       {relationshipCategories.map((category) => (
-                        <SelectItem key={`compact-relationship:${category}`} value={category}>
+                        <SelectItem
+                          key={`compact-relationship:${category}`}
+                          value={category}
+                          style={colorSurfaceStyle(relationshipCategoryStroke[category])}
+                        >
                           <ColorLabel
                             color={relationshipCategoryStroke[category]}
                             label={relationshipCategoryLabels[category]}
@@ -2920,13 +3181,21 @@ export function OrgChart({
                     value={statusFilter}
                     onValueChange={(value) => setStatusFilter(value as EnterpriseGraphNode["status"] | "all")}
                   >
-                    <SelectTrigger className={compactSelectTriggerClass}>
+                    <SelectTrigger
+                      className={compactSelectTriggerClass}
+                      data-filter-color={statusFilterColor ?? ""}
+                      style={colorSurfaceStyle(statusFilterColor)}
+                    >
                       <SelectValue placeholder="Status" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">Any status</SelectItem>
                       {statusOptions.map((status) => (
-                        <SelectItem key={`compact-status:${status}`} value={status}>
+                        <SelectItem
+                          key={`compact-status:${status}`}
+                          value={status}
+                          style={colorSurfaceStyle(statusDotColor[status] ?? defaultDotColor)}
+                        >
                           <ColorLabel color={statusDotColor[status] ?? defaultDotColor} label={status} />
                         </SelectItem>
                       ))}
@@ -2965,14 +3234,22 @@ export function OrgChart({
                   </Select>
 
                   <Select value={permissionFilter} onValueChange={(value) => setPermissionFilter(value as EnterprisePermissionFilter)}>
-                    <SelectTrigger className={compactWideSelectTriggerClass}>
+                    <SelectTrigger
+                      className={compactWideSelectTriggerClass}
+                      data-filter-color={permissionFilterColor ?? ""}
+                      style={colorSurfaceStyle(permissionFilterColor)}
+                    >
                       <SelectValue placeholder="Permissions" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">Any permissions</SelectItem>
                       <SelectItem value="any">Any elevated permission</SelectItem>
                       {inspectorPermissionDescriptors.map((descriptor) => (
-                        <SelectItem key={`compact-permission:${descriptor.key}`} value={descriptor.key}>
+                        <SelectItem
+                          key={`compact-permission:${descriptor.key}`}
+                          value={descriptor.key}
+                          style={colorSurfaceStyle(descriptor.color)}
+                        >
                           <ColorLabel color={descriptor.color} label={descriptor.label} />
                         </SelectItem>
                       ))}
@@ -2980,7 +3257,11 @@ export function OrgChart({
                   </Select>
 
                   <Select value={metadataFilter} onValueChange={(value) => setMetadataFilter(value as EnterpriseMetadataFilter)}>
-                    <SelectTrigger className={compactWideSelectTriggerClass}>
+                    <SelectTrigger
+                      className={compactWideSelectTriggerClass}
+                      data-filter-color={metadataFilterColor ?? ""}
+                      style={colorSurfaceStyle(metadataFilterColor)}
+                    >
                       <SelectValue placeholder="Metadata" />
                     </SelectTrigger>
                     <SelectContent>
@@ -3006,7 +3287,11 @@ export function OrgChart({
                   </Select>
 
                   <Select value={errorFilter} onValueChange={(value) => setErrorFilter(value as EnterpriseErrorFilter)}>
-                    <SelectTrigger className={compactSelectTriggerClass}>
+                    <SelectTrigger
+                      className={compactSelectTriggerClass}
+                      data-filter-color={errorFilterColor ?? ""}
+                      style={colorSurfaceStyle(errorFilterColor)}
+                    >
                       <SelectValue placeholder="Errors" />
                     </SelectTrigger>
                     <SelectContent>
@@ -3019,7 +3304,11 @@ export function OrgChart({
                   </Select>
 
                   <Select value={crossCompanyFilter} onValueChange={(value) => setCrossCompanyFilter(value as EnterpriseCrossCompanyFilter)}>
-                    <SelectTrigger className={compactWideSelectTriggerClass}>
+                    <SelectTrigger
+                      className={compactWideSelectTriggerClass}
+                      data-filter-color={crossCompanyFilterColor ?? ""}
+                      style={colorSurfaceStyle(crossCompanyFilterColor)}
+                    >
                       <SelectValue placeholder="Link scope" />
                     </SelectTrigger>
                     <SelectContent>
@@ -3047,6 +3336,7 @@ export function OrgChart({
                       data-company-color-key={item.id}
                       data-color={item.color}
                       className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border/65 bg-card/70 px-2 py-0.5 text-foreground/85 dark:border-white/10 dark:bg-slate-950/65"
+                      style={colorSurfaceStyle(item.color)}
                     >
                       <ColorDot color={item.color} className="h-2 w-2" />
                       <span className="max-w-[11rem] truncate">{item.name}</span>
@@ -3057,6 +3347,7 @@ export function OrgChart({
                     data-line-color-key="reports-to"
                     data-color={DEFAULT_EDGE_STROKE}
                     className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border/65 bg-card/70 px-2 py-0.5 text-foreground/85 dark:border-white/10 dark:bg-slate-950/65"
+                    style={colorSurfaceStyle(DEFAULT_EDGE_STROKE)}
                   >
                     <ColorDot color={DEFAULT_EDGE_STROKE} className="h-2 w-2" />
                     Reports-to
@@ -3065,6 +3356,7 @@ export function OrgChart({
                     data-line-color-key="cross-company"
                     data-color={CROSS_COMPANY_STROKE}
                     className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border/65 bg-card/70 px-2 py-0.5 text-foreground/85 dark:border-white/10 dark:bg-slate-950/65"
+                    style={colorSurfaceStyle(CROSS_COMPANY_STROKE)}
                   >
                     <ColorDot color={CROSS_COMPANY_STROKE} className="h-2 w-2" />
                     Cross-company
@@ -3075,6 +3367,7 @@ export function OrgChart({
                       data-relationship-color-key={category}
                       data-color={relationshipCategoryStroke[category]}
                       className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border/65 bg-card/70 px-2 py-0.5 text-foreground/85 dark:border-white/10 dark:bg-slate-950/65"
+                      style={colorSurfaceStyle(relationshipCategoryStroke[category])}
                     >
                       <ColorDot color={relationshipCategoryStroke[category]} className="h-2 w-2" />
                       {relationshipCategoryLabels[category]}
@@ -3676,11 +3969,12 @@ export function OrgChart({
               fullscreen ? "rounded-3xl" : "rounded-2xl",
             )}
             style={{ cursor: dragging ? "grabbing" : "grab" }}
+            data-graph-zoom={zoom.toFixed(4)}
+            data-graph-shortcut="ctrl-wheel-zoom"
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
-            onWheel={handleWheel}
           >
           <div
             className="pointer-events-none absolute inset-0 opacity-90"
@@ -3700,14 +3994,14 @@ export function OrgChart({
           <div className="absolute right-3 top-3 z-10 flex flex-col gap-1">
             <button
               className="flex h-8 w-8 items-center justify-center rounded-xl border border-border/70 bg-background/90 text-sm shadow-sm backdrop-blur transition-colors hover:bg-accent dark:border-white/10 dark:bg-slate-950/80"
-              onClick={() => zoomAroundCenter(Math.min(zoom * 1.2, 2))}
+              onClick={() => zoomAroundCenter(Math.min(zoom * 1.2, GRAPH_MAX_ZOOM))}
               aria-label="Zoom in"
             >
               +
             </button>
             <button
               className="flex h-8 w-8 items-center justify-center rounded-xl border border-border/70 bg-background/90 text-sm shadow-sm backdrop-blur transition-colors hover:bg-accent dark:border-white/10 dark:bg-slate-950/80"
-              onClick={() => zoomAroundCenter(Math.max(zoom * 0.8, 0.2))}
+              onClick={() => zoomAroundCenter(Math.max(zoom * 0.8, GRAPH_MIN_ZOOM))}
               aria-label="Zoom out"
             >
               &minus;
@@ -3720,6 +4014,12 @@ export function OrgChart({
             >
               Fit
             </button>
+            <div
+              data-graph-shortcuts
+              className="pointer-events-none -ml-20 mt-1 w-28 rounded-xl border border-border/70 bg-background/90 px-2 py-1 text-center text-[10px] font-medium text-foreground/75 shadow-sm backdrop-blur dark:border-white/10 dark:bg-slate-950/82"
+            >
+              Ctrl + wheel zoom
+            </div>
           </div>
 
           <div className="absolute left-3 top-3 z-10 max-w-xs rounded-2xl border border-border/70 bg-background/92 p-3 shadow-lg backdrop-blur dark:border-white/10 dark:bg-slate-950/82">
@@ -3774,7 +4074,12 @@ export function OrgChart({
                       !enterpriseNodeFilterActive || highlightedCompanyKeys.has(group.key);
 
                     return (
-                      <g key={group.key} opacity={groupHighlighted ? 1 : 0.24}>
+                      <g
+                        key={group.key}
+                        data-company-graph-group={group.companyId ?? group.key}
+                        data-color={group.accentColor}
+                        opacity={groupHighlighted ? 1 : 0.24}
+                      >
                         {wiringVisibility.showCompanyContainers ? (
                           <>
                             <rect
