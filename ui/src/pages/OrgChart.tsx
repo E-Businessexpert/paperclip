@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Download,
   Eye,
   EyeOff,
@@ -59,6 +60,7 @@ import { agentUrl, cn } from "../lib/utils";
 const CARD_W = 200;
 const CARD_H = 108;
 const GAP_X = 32;
+const FOREST_ROOT_GAP_X = 128;
 const GAP_Y = 84;
 const PADDING = 60;
 const COMPANY_GROUP_PADDING_X = 28;
@@ -840,7 +842,7 @@ function layoutForest(
   for (const root of roots) {
     const width = subtreeWidth(root);
     result.push(layoutTree(root, x, PADDING, childCountMap, collapsedNodeIds));
-    x += width + GAP_X;
+    x += width + FOREST_ROOT_GAP_X;
   }
   return result;
 }
@@ -1275,6 +1277,7 @@ export function OrgChart({
   const [filtersOpen, setFiltersOpen] = useState(
     () => initialStoredViewMode === "enterprise" && !compactFilters,
   );
+  const [compactControlsCollapsed, setCompactControlsCollapsed] = useState(false);
   const [inspectorMinimized, setInspectorMinimized] = useState(defaultInspectorMinimized);
   const [collapsedNodeIds, setCollapsedNodeIds] = useState<Set<string>>(new Set());
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -1370,6 +1373,7 @@ export function OrgChart({
       createDefaultWiringVisibility(enterpriseScope, effectiveViewMode, startExpanded),
     );
     setFiltersOpen(effectiveViewMode === "enterprise" && !compactFilters);
+    setCompactControlsCollapsed(false);
     setInspectorMinimized(defaultInspectorMinimized);
   }, [
     compactFilters,
@@ -3048,9 +3052,47 @@ export function OrgChart({
 
       {effectiveViewMode === "enterprise" && enterpriseGraph ? (
         <>
-          <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-2xl border border-border/70 bg-gradient-to-r from-card/95 via-card/88 to-muted/45 px-3 py-3 shadow-sm dark:border-white/10 dark:from-slate-950/88 dark:via-slate-950/78 dark:to-slate-900/68">
+          <div
+            data-full-structure-topbar
+            data-controls-collapsed={compactFilters ? compactControlsCollapsed : undefined}
+            className={cn(
+              "flex shrink-0 flex-wrap items-center gap-2 rounded-2xl border border-border/70 bg-gradient-to-r from-card/95 via-card/88 to-muted/45 px-3 py-3 shadow-sm dark:border-white/10 dark:from-slate-950/88 dark:via-slate-950/78 dark:to-slate-900/68",
+              fullscreen &&
+                compactFilters &&
+                "sticky top-3 z-40 ring-1 ring-background/40 backdrop-blur-xl dark:ring-slate-950/40 md:top-5",
+            )}
+          >
             {compactFilters ? (
               <>
+                <Button
+                  data-full-structure-controls-toggle
+                  size="sm"
+                  variant="outline"
+                  className="shrink-0"
+                  onClick={() => setCompactControlsCollapsed((previous) => !previous)}
+                  aria-expanded={!compactControlsCollapsed}
+                >
+                  {compactControlsCollapsed ? (
+                    <ChevronDown className="mr-1.5 h-3.5 w-3.5" />
+                  ) : (
+                    <ChevronUp className="mr-1.5 h-3.5 w-3.5" />
+                  )}
+                  {compactControlsCollapsed ? "Show filters" : "Hide filters"}
+                </Button>
+
+                {compactControlsCollapsed ? (
+                  <button
+                    type="button"
+                    data-full-structure-controls-rail
+                    className="inline-flex min-h-9 flex-1 items-center justify-between gap-2 rounded-xl border border-border/70 bg-background/70 px-3 text-left text-xs text-muted-foreground shadow-inner transition-colors hover:bg-accent/45 hover:text-foreground dark:border-white/10 dark:bg-slate-950/60"
+                    onClick={() => setCompactControlsCollapsed(false)}
+                    aria-label="Show full filters and color key"
+                  >
+                    <span className="font-medium">Filters and color key hidden</span>
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+                  </button>
+                ) : (
+                  <>
                 <div
                   data-full-structure-filters
                   className="flex min-w-[min(100%,42rem)] flex-1 items-center gap-1 overflow-x-auto rounded-xl border border-border/70 bg-background/75 p-1 shadow-inner dark:border-white/10 dark:bg-slate-950/60"
@@ -3374,6 +3416,8 @@ export function OrgChart({
                     </span>
                   ))}
                 </div>
+                  </>
+                )}
 
                 <Popover open={filtersOpen} onOpenChange={setFiltersOpen}>
                   <PopoverTrigger asChild>
@@ -3465,18 +3509,20 @@ export function OrgChart({
                 {filtersOpen ? "Hide filters" : "Show filters"}
               </Button>
             )}
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setInspectorMinimized((previous) => !previous)}
-            >
-              {inspectorMinimized ? (
-                <Eye className="mr-1.5 h-3.5 w-3.5" />
-              ) : (
-                <EyeOff className="mr-1.5 h-3.5 w-3.5" />
-              )}
-              {inspectorMinimized ? "Show inspector" : "Minimize inspector"}
-            </Button>
+            {compactFilters ? null : (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setInspectorMinimized((previous) => !previous)}
+              >
+                {inspectorMinimized ? (
+                  <Eye className="mr-1.5 h-3.5 w-3.5" />
+                ) : (
+                  <EyeOff className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                {inspectorMinimized ? "Show inspector" : "Minimize inspector"}
+              </Button>
+            )}
             <Button size="sm" variant="outline" onClick={resetEnterpriseFilters}>
               Reset filters
             </Button>
@@ -4468,30 +4514,31 @@ export function OrgChart({
 
         {inspectorMinimized ? (
           <aside
+            data-wiring-inspector-rail
             className={cn(
-              "flex min-h-[320px] shrink-0 items-stretch rounded-2xl border border-border/70 bg-gradient-to-br from-card/95 via-card/90 to-muted/45 shadow-sm dark:border-white/10 dark:from-slate-950/90 dark:via-slate-950/84 dark:to-slate-900/72",
-              fullscreen ? "xl:w-[74px]" : "xl:w-[68px]",
+              "flex min-h-10 shrink-0 items-stretch rounded-2xl border border-border/70 bg-gradient-to-br from-card/95 via-card/90 to-muted/45 shadow-sm dark:border-white/10 dark:from-slate-950/90 dark:via-slate-950/84 dark:to-slate-900/72 xl:min-h-[320px]",
+              fullscreen ? "xl:w-10" : "xl:w-10",
             )}
           >
             <button
               type="button"
-              className="flex w-full flex-col items-center justify-center gap-3 px-2 py-4 text-center transition-colors hover:bg-accent/50"
+              className="flex w-full items-center justify-center px-2 py-3 text-center transition-colors hover:bg-accent/50 xl:flex-col xl:py-4"
               onClick={() => setInspectorMinimized(false)}
               title="Open Wiring Inspector"
+              aria-label="Open Wiring Inspector"
             >
-              <Eye className="h-4.5 w-4.5 text-foreground/80" />
-              <span className="-rotate-90 whitespace-nowrap text-[11px] font-semibold text-foreground/80">
-                Wiring Inspector
-              </span>
+              <ChevronLeft className="h-4.5 w-4.5 text-foreground/80" />
+              <span className="sr-only">Open Wiring Inspector</span>
               {focusTarget ? (
-                <span className="rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[10px] text-sky-700 dark:text-sky-200">
-                  Live
+                <span className="sr-only">
+                  Focused wiring item active
                 </span>
               ) : null}
             </button>
           </aside>
         ) : (
           <aside
+            data-wiring-inspector-panel
             className={cn(
               "flex min-h-[320px] shrink-0 flex-col rounded-2xl border border-border/70 bg-gradient-to-br from-card/95 via-card/90 to-muted/45 p-3 shadow-sm dark:border-white/10 dark:from-slate-950/90 dark:via-slate-950/84 dark:to-slate-900/72",
               fullscreen ? "xl:w-[360px]" : "xl:w-[340px]",

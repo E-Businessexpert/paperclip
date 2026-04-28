@@ -62,6 +62,7 @@ export function FullStructurePage() {
         initialViewMode="enterprise"
         lockViewMode="enterprise"
         startExpanded
+        defaultInspectorMinimized
         compactFilters
         enterpriseScope="family"
         showBackButton
