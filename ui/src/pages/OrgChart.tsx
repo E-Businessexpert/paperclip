@@ -11,6 +11,7 @@ import {
   EyeOff,
   GitBranch,
   Maximize2,
+  Minimize2,
   Network,
   SlidersHorizontal,
   Upload,
@@ -1358,6 +1359,7 @@ export function OrgChart({
   const [inspectorMinimized, setInspectorMinimized] = useState(defaultInspectorMinimized);
   const [collapsedNodeIds, setCollapsedNodeIds] = useState<Set<string>>(new Set());
   const [expandedCardDetailIds, setExpandedCardDetailIds] = useState<Set<string>>(new Set());
+  const [graphFocusMode, setGraphFocusMode] = useState(false);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [dragging, setDragging] = useState(false);
@@ -1454,6 +1456,7 @@ export function OrgChart({
     setCompactControlsCollapsed(false);
     setInspectorMinimized(defaultInspectorMinimized);
     setExpandedCardDetailIds(new Set());
+    setGraphFocusMode(false);
   }, [
     compactFilters,
     defaultInspectorMinimized,
@@ -2531,11 +2534,10 @@ export function OrgChart({
       : focusAgents[0]?.title ?? "Focused agent";
   }, [departmentByAgentId, focusAgents, focusTarget, focusedDepartmentGroup]);
 
-  useEffect(() => {
-    if (hasInitialized.current || allNodes.length === 0 || !containerRef.current) return;
-    hasInitialized.current = true;
-
+  const resetGraphViewport = useCallback(() => {
     const container = containerRef.current;
+    if (!container) return;
+
     const containerW = container.clientWidth;
     const containerH = container.clientHeight;
     const scaleX = (containerW - 40) / bounds.width;
@@ -2543,23 +2545,76 @@ export function OrgChart({
     const fitZoom = Math.min(scaleX, scaleY, 1);
     const readableFullStructure =
       fullscreen && compactFilters && startExpanded && effectiveViewMode === "enterprise";
-    const initialZoom = readableFullStructure ? 1 : fitZoom;
-    const chartW = bounds.width * initialZoom;
-    const chartH = bounds.height * initialZoom;
 
-    setZoom(initialZoom);
+    if (readableFullStructure) {
+      if (allNodes.length === 0) return;
+      const focusNodes = allNodes.filter((node) => node.depth <= 1);
+      const nodesToFrame = focusNodes.length > 0 ? focusNodes : allNodes.slice(0, 1);
+      const minX = Math.min(...nodesToFrame.map((node) => node.x)) - 96;
+      const maxX = Math.max(...nodesToFrame.map((node) => node.x + CARD_W)) + 96;
+      const minY = Math.min(...nodesToFrame.map((node) => node.y)) - 64;
+      const maxY = Math.max(...nodesToFrame.map((node) => node.y + CARD_H)) + 96;
+      const focusW = Math.max(maxX - minX, CARD_W + 96);
+      const focusH = Math.max(maxY - minY, CARD_H + 96);
+      const focusZoom = Math.min(
+        Math.max(Math.min((containerW - 96) / focusW, (containerH - 120) / focusH, 1), 0.72),
+        1,
+      );
+
+      setZoom(focusZoom);
+      setPan({
+        x: (containerW - focusW * focusZoom) / 2 - minX * focusZoom,
+        y: Math.max(48, containerH * 0.08) - minY * focusZoom,
+      });
+      return;
+    }
+
+    const chartW = bounds.width * fitZoom;
+    const chartH = bounds.height * fitZoom;
+
+    setZoom(fitZoom);
     setPan(
-      readableFullStructure
-        ? {
-            x: 32 - PADDING * initialZoom,
-            y: Math.min(containerH * 0.16, 150) - PADDING * initialZoom,
-          }
-        : {
-            x: (containerW - chartW) / 2,
-            y: (containerH - chartH) / 2,
-          },
+      {
+        x: (containerW - chartW) / 2,
+        y: (containerH - chartH) / 2,
+      },
     );
   }, [allNodes, bounds, compactFilters, effectiveViewMode, fullscreen, startExpanded]);
+
+  const requestGraphViewportReset = useCallback(() => {
+    if (typeof window === "undefined") {
+      resetGraphViewport();
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      resetGraphViewport();
+    });
+  }, [resetGraphViewport]);
+
+  useEffect(() => {
+    if (hasInitialized.current || allNodes.length === 0 || !containerRef.current) return;
+    hasInitialized.current = true;
+    resetGraphViewport();
+  }, [allNodes.length, resetGraphViewport]);
+
+  useEffect(() => {
+    if (!graphFocusMode) return;
+    requestGraphViewportReset();
+  }, [graphFocusMode, requestGraphViewportReset]);
+
+  useEffect(() => {
+    if (!graphFocusMode) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setGraphFocusMode(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [graphFocusMode]);
 
   const fitToScreen = useCallback(() => {
     if (!containerRef.current) return;
@@ -2797,8 +2852,22 @@ export function OrgChart({
     setErrorFilter("all");
     setCrossCompanyFilter("all");
     setWiringVisibility(createDefaultWiringVisibility(enterpriseScope, effectiveViewMode, startExpanded));
+    const nextCollapsedNodeIds = new Set<string>();
+    setCollapsedNodeIds(nextCollapsedNodeIds);
+    persistStoredCollapsedNodeIds(collapseStateStorageKey, nextCollapsedNodeIds);
+    setExpandedCardDetailIds(new Set());
+    setCompactControlsCollapsed(false);
+    setFiltersOpen(false);
+    setFocusTarget(null);
     setSelectedInspectorItem(null);
-  }, [effectiveViewMode, enterpriseScope, startExpanded]);
+    requestGraphViewportReset();
+  }, [
+    effectiveViewMode,
+    enterpriseScope,
+    collapseStateStorageKey,
+    requestGraphViewportReset,
+    startExpanded,
+  ]);
 
   const persistCollapsedNodeIdsForCurrentScope = useCallback(
     (nextCollapsedNodeIds: ReadonlySet<string>) => {
@@ -2808,6 +2877,7 @@ export function OrgChart({
   );
 
   const expandGraphWorkspace = useCallback(() => {
+    setGraphFocusMode(true);
     setFiltersOpen(false);
     setInspectorMinimized(true);
     const nextCollapsedNodeIds = new Set<string>();
@@ -2823,12 +2893,8 @@ export function OrgChart({
       showRelationshipLines: true,
     });
 
-    const graphElement = containerRef.current;
-    if (!graphElement?.requestFullscreen) return;
-    void graphElement.requestFullscreen().catch(() => {
-      // Browser fullscreen can be blocked by policy; layout expansion still applies.
-    });
-  }, [persistCollapsedNodeIdsForCurrentScope]);
+    requestGraphViewportReset();
+  }, [persistCollapsedNodeIdsForCurrentScope, requestGraphViewportReset]);
 
   const handleWiringVisibilityChange = useCallback(
     (key: keyof WiringVisibilityState, checked: boolean) => {
@@ -3057,6 +3123,12 @@ export function OrgChart({
       : fullscreen
         ? "min-h-[78dvh]"
         : "min-h-[440px]";
+  const graphWorkspaceShellClass = graphFocusMode
+    ? "fixed inset-0 z-[80] h-[100dvh] w-screen gap-3 bg-background/98 p-3 backdrop-blur-sm"
+    : graphWorkspaceHeightClass;
+  const graphPanelHeightClass = graphFocusMode
+    ? "h-full min-h-0"
+    : graphWorkspaceHeightClass;
 
   return (
     <div className={cn("flex min-h-full flex-col gap-3", fullscreen && "h-auto")}>
@@ -3196,6 +3268,7 @@ export function OrgChart({
                   <Select value={companyAFilter} onValueChange={setCompanyAFilter}>
                     <SelectTrigger
                       className={compactWideSelectTriggerClass}
+                      data-enterprise-filter="company-a"
                       data-filter-color={companyAFilterColor ?? ""}
                       style={colorSurfaceStyle(companyAFilterColor)}
                     >
@@ -3614,11 +3687,21 @@ export function OrgChart({
                 {inspectorMinimized ? "Show inspector" : "Minimize inspector"}
               </Button>
             )}
-            <Button size="sm" variant="outline" onClick={resetEnterpriseFilters}>
+            <Button
+              data-reset-enterprise-filters
+              size="sm"
+              variant="outline"
+              onClick={resetEnterpriseFilters}
+            >
               Reset filters
             </Button>
             {fullscreen ? (
-              <Button size="sm" variant="outline" onClick={expandGraphWorkspace}>
+              <Button
+                data-graph-fullscreen-toggle
+                size="sm"
+                variant="outline"
+                onClick={expandGraphWorkspace}
+              >
                 <Maximize2 className="mr-1.5 h-3.5 w-3.5" />
                 Graph full screen
               </Button>
@@ -4096,13 +4179,16 @@ export function OrgChart({
           </section>
         ) : null}
 
-        <div className={cn("flex flex-1 flex-col gap-3 xl:flex-row", graphWorkspaceHeightClass)}>
+        <div
+          data-graph-focus-mode={graphFocusMode ? "true" : "false"}
+          className={cn("flex flex-1 flex-col gap-3 xl:flex-row", graphWorkspaceShellClass)}
+        >
           <div
             ref={containerRef}
             data-full-structure-graph
             className={cn(
               "relative min-w-0 flex-1 overflow-hidden border border-border/70 bg-gradient-to-br from-slate-100/70 via-background to-slate-200/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] dark:border-white/10 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900/90",
-              graphWorkspaceHeightClass,
+              graphPanelHeightClass,
               fullscreen ? "rounded-3xl" : "rounded-2xl",
             )}
             style={{ cursor: dragging ? "grabbing" : "grab" }}
@@ -4129,6 +4215,16 @@ export function OrgChart({
           />
 
           <div className="absolute right-3 top-3 z-10 flex flex-col gap-1">
+            {graphFocusMode ? (
+              <button
+                className="flex h-8 w-8 items-center justify-center rounded-xl border border-border/70 bg-background/90 text-sm shadow-sm backdrop-blur transition-colors hover:bg-accent dark:border-white/10 dark:bg-slate-950/80"
+                onClick={() => setGraphFocusMode(false)}
+                aria-label="Exit graph full screen"
+                title="Exit graph full screen"
+              >
+                <Minimize2 className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
             <button
               className="flex h-8 w-8 items-center justify-center rounded-xl border border-border/70 bg-background/90 text-sm shadow-sm backdrop-blur transition-colors hover:bg-accent dark:border-white/10 dark:bg-slate-950/80"
               onClick={() => zoomAroundCenter(Math.min(zoom * 1.2, GRAPH_MAX_ZOOM))}
