@@ -2921,9 +2921,9 @@ export function OrgChart({
   }
 
   const compactSelectTriggerClass =
-    "h-8 w-[9.5rem] justify-between border-border/70 bg-background/85 px-2 text-xs";
+    "h-7 w-[8.75rem] justify-between border-border/70 bg-background/85 px-2 text-[11px]";
   const compactWideSelectTriggerClass =
-    "h-8 w-[13rem] justify-between border-border/70 bg-background/85 px-2 text-xs";
+    "h-7 w-[11.25rem] justify-between border-border/70 bg-background/85 px-2 text-[11px]";
   const companyAFilterColor =
     companyAFilter === ALL_COMPANIES_FILTER
       ? undefined
@@ -3056,10 +3056,10 @@ export function OrgChart({
             data-full-structure-topbar
             data-controls-collapsed={compactFilters ? compactControlsCollapsed : undefined}
             className={cn(
-              "flex shrink-0 flex-wrap items-center gap-2 rounded-2xl border border-border/70 bg-gradient-to-r from-card/95 via-card/88 to-muted/45 px-3 py-3 shadow-sm dark:border-white/10 dark:from-slate-950/88 dark:via-slate-950/78 dark:to-slate-900/68",
+              "isolate flex shrink-0 flex-wrap items-center gap-1.5 rounded-xl border border-border/70 bg-card px-2 py-1.5 shadow-sm dark:border-white/10 dark:bg-slate-950",
               fullscreen &&
                 compactFilters &&
-                "sticky top-3 z-40 ring-1 ring-background/40 backdrop-blur-xl dark:ring-slate-950/40 md:top-5",
+                "sticky top-0 z-50 shadow-[0_18px_44px_-30px_rgba(15,23,42,0.85)] ring-1 ring-background/80 dark:ring-slate-950/80",
             )}
           >
             {compactFilters ? (
@@ -3084,7 +3084,7 @@ export function OrgChart({
                   <button
                     type="button"
                     data-full-structure-controls-rail
-                    className="inline-flex min-h-9 flex-1 items-center justify-between gap-2 rounded-xl border border-border/70 bg-background/70 px-3 text-left text-xs text-muted-foreground shadow-inner transition-colors hover:bg-accent/45 hover:text-foreground dark:border-white/10 dark:bg-slate-950/60"
+                    className="inline-flex min-h-8 flex-1 items-center justify-between gap-2 rounded-lg border border-border/70 bg-background/70 px-2.5 text-left text-[11px] text-muted-foreground shadow-inner transition-colors hover:bg-accent/45 hover:text-foreground dark:border-white/10 dark:bg-slate-950/60"
                     onClick={() => setCompactControlsCollapsed(false)}
                     aria-label="Show full filters and color key"
                   >
@@ -3095,7 +3095,7 @@ export function OrgChart({
                   <>
                 <div
                   data-full-structure-filters
-                  className="flex min-w-[min(100%,42rem)] flex-1 items-center gap-1 overflow-x-auto rounded-xl border border-border/70 bg-background/75 p-1 shadow-inner dark:border-white/10 dark:bg-slate-950/60"
+                  className="flex min-w-0 flex-1 basis-[44rem] items-center gap-1 overflow-x-auto rounded-lg border border-border/70 bg-background/75 p-0.5 shadow-inner dark:border-white/10 dark:bg-slate-950/60"
                   aria-label="Enterprise filter toolbar"
                 >
                   <span className="shrink-0 rounded-lg bg-muted/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
@@ -3365,7 +3365,7 @@ export function OrgChart({
 
                 <div
                   data-full-structure-color-key
-                  className="order-last flex w-full items-center gap-2 overflow-x-auto rounded-xl border border-border/60 bg-background/55 px-2 py-1.5 text-[11px] shadow-inner dark:border-white/10 dark:bg-slate-950/45"
+                  className="order-last flex h-8 w-full items-center gap-1.5 overflow-x-auto rounded-lg border border-border/60 bg-background/55 px-1.5 py-0.5 text-[10px] shadow-inner dark:border-white/10 dark:bg-slate-950/45"
                   aria-label="Graph color key"
                 >
                   <span className="shrink-0 rounded-md bg-muted/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
@@ -3377,18 +3377,18 @@ export function OrgChart({
                       key={`compact-company-color:${item.id}`}
                       data-company-color-key={item.id}
                       data-color={item.color}
-                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border/65 bg-card/70 px-2 py-0.5 text-foreground/85 dark:border-white/10 dark:bg-slate-950/65"
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border/65 bg-card/70 px-1.5 py-0.5 text-foreground/85 dark:border-white/10 dark:bg-slate-950/65"
                       style={colorSurfaceStyle(item.color)}
                     >
                       <ColorDot color={item.color} className="h-2 w-2" />
-                      <span className="max-w-[11rem] truncate">{item.name}</span>
+                      <span className="max-w-[9.5rem] truncate">{item.name}</span>
                     </span>
                   ))}
                   <span className="ml-1 shrink-0 text-muted-foreground">Lines</span>
                   <span
                     data-line-color-key="reports-to"
                     data-color={DEFAULT_EDGE_STROKE}
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border/65 bg-card/70 px-2 py-0.5 text-foreground/85 dark:border-white/10 dark:bg-slate-950/65"
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border/65 bg-card/70 px-1.5 py-0.5 text-foreground/85 dark:border-white/10 dark:bg-slate-950/65"
                     style={colorSurfaceStyle(DEFAULT_EDGE_STROKE)}
                   >
                     <ColorDot color={DEFAULT_EDGE_STROKE} className="h-2 w-2" />
@@ -3397,7 +3397,7 @@ export function OrgChart({
                   <span
                     data-line-color-key="cross-company"
                     data-color={CROSS_COMPANY_STROKE}
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border/65 bg-card/70 px-2 py-0.5 text-foreground/85 dark:border-white/10 dark:bg-slate-950/65"
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border/65 bg-card/70 px-1.5 py-0.5 text-foreground/85 dark:border-white/10 dark:bg-slate-950/65"
                     style={colorSurfaceStyle(CROSS_COMPANY_STROKE)}
                   >
                     <ColorDot color={CROSS_COMPANY_STROKE} className="h-2 w-2" />
@@ -3408,7 +3408,7 @@ export function OrgChart({
                       key={`compact-relationship-color:${category}`}
                       data-relationship-color-key={category}
                       data-color={relationshipCategoryStroke[category]}
-                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border/65 bg-card/70 px-2 py-0.5 text-foreground/85 dark:border-white/10 dark:bg-slate-950/65"
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border/65 bg-card/70 px-1.5 py-0.5 text-foreground/85 dark:border-white/10 dark:bg-slate-950/65"
                       style={colorSurfaceStyle(relationshipCategoryStroke[category])}
                     >
                       <ColorDot color={relationshipCategoryStroke[category]} className="h-2 w-2" />
@@ -3533,7 +3533,7 @@ export function OrgChart({
               </Button>
             ) : null}
 
-            <div className="ml-auto flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+            <div className="ml-auto flex max-w-full flex-nowrap items-center gap-1.5 overflow-x-auto text-[10px] text-muted-foreground">
               <span className="rounded-full border border-border/70 bg-background/75 px-2.5 py-1 dark:border-white/10 dark:bg-slate-950/70">
                 {enterpriseScope === "family" ? "Family-wide structure" : "Company structure"}
               </span>
@@ -4068,29 +4068,31 @@ export function OrgChart({
             </div>
           </div>
 
-          <div className="absolute left-3 top-3 z-10 max-w-xs rounded-2xl border border-border/70 bg-background/92 p-3 shadow-lg backdrop-blur dark:border-white/10 dark:bg-slate-950/82">
-            <div className="text-sm font-semibold text-foreground">
-              {effectiveViewMode === "enterprise" ? "Enterprise overlay" : "Hierarchy overlay"}
-            </div>
-            <div className="mt-1 text-xs text-muted-foreground">
-              Click a card to focus an agent. Click a department chip to aggregate routing across that team.
-            </div>
-            <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1">
-              {relationshipCategories.map((category) => (
-                <div key={category} className="flex items-center gap-2 text-[11px] text-foreground/80">
-                  <span
-                    className="h-2.5 w-2.5 rounded-full"
-                    style={{ backgroundColor: relationshipCategoryStroke[category] }}
-                  />
-                  <span>{relationshipCategoryLabels[category]}</span>
+          {!compactFilters ? (
+            <div className="absolute left-3 top-3 z-10 max-w-xs rounded-2xl border border-border/70 bg-background/92 p-3 shadow-lg backdrop-blur dark:border-white/10 dark:bg-slate-950/82">
+              <div className="text-sm font-semibold text-foreground">
+                {effectiveViewMode === "enterprise" ? "Enterprise overlay" : "Hierarchy overlay"}
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                Click a card to focus an agent. Click a department chip to aggregate routing across that team.
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1">
+                {relationshipCategories.map((category) => (
+                  <div key={category} className="flex items-center gap-2 text-[11px] text-foreground/80">
+                    <span
+                      className="h-2.5 w-2.5 rounded-full"
+                      style={{ backgroundColor: relationshipCategoryStroke[category] }}
+                    />
+                    <span>{relationshipCategoryLabels[category]}</span>
+                  </div>
+                ))}
+                <div className="flex items-center gap-2 text-[11px] text-foreground/80">
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: hierarchyFocusStroke }} />
+                  <span>Formal reporting</span>
                 </div>
-              ))}
-              <div className="flex items-center gap-2 text-[11px] text-foreground/80">
-                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: hierarchyFocusStroke }} />
-                <span>Formal reporting</span>
               </div>
             </div>
-          </div>
+          ) : null}
 
           <svg className="pointer-events-none absolute inset-0 h-full w-full">
             <defs>
