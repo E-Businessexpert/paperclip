@@ -673,6 +673,10 @@ function persistStoredCollapsedNodeIds(storageKey: string | null, collapsedNodeI
   }
 }
 
+function serializeCollapsedNodeIds(collapsedNodeIds: ReadonlySet<string>) {
+  return Array.from(collapsedNodeIds).sort().join("|");
+}
+
 function createDefaultWiringVisibility(
   enterpriseScope: EnterpriseGraphScopeMode,
   viewMode: OrgViewMode,
@@ -1327,7 +1331,7 @@ export function OrgChart({
   const dragStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
   const hasInitialized = useRef(false);
   const hasInitializedCollapseState = useRef(false);
-  const hasAlignedAfterCollapseState = useRef(false);
+  const pendingCollapseViewportAlignmentKey = useRef<string | null>(null);
   const initialStoredViewMode = lockViewMode ?? readStoredOrgViewMode(initialViewMode);
 
   const [viewMode, setViewMode] = useState<OrgViewMode>(() => initialStoredViewMode);
@@ -1428,7 +1432,7 @@ export function OrgChart({
   useEffect(() => {
     hasInitialized.current = false;
     hasInitializedCollapseState.current = false;
-    hasAlignedAfterCollapseState.current = false;
+    pendingCollapseViewportAlignmentKey.current = null;
   }, [collapseStateStorageKey, effectiveViewMode, enterpriseScope, selectedCompanyId]);
 
   useEffect(() => {
@@ -1625,6 +1629,10 @@ export function OrgChart({
   );
 
   const childCountMap = useMemo(() => buildChildCountMap(rawRoots), [rawRoots]);
+  const collapsedViewportAlignmentKey = useMemo(
+    () => serializeCollapsedNodeIds(collapsedNodeIds),
+    [collapsedNodeIds],
+  );
 
   useEffect(() => {
     if (hasInitializedCollapseState.current || rawRoots.length === 0) return;
@@ -1635,17 +1643,21 @@ export function OrgChart({
       collectOrgNodeIds(rawRoots),
     );
 
+    let nextCollapsedNodeIds: Set<string>;
     if (storedCollapsedNodeIds) {
-      setCollapsedNodeIds(storedCollapsedNodeIds);
+      nextCollapsedNodeIds = storedCollapsedNodeIds;
     } else if (startExpanded) {
-      setCollapsedNodeIds(new Set());
+      nextCollapsedNodeIds = new Set();
     } else if (fullscreen && effectiveViewMode === "hierarchy") {
-      setCollapsedNodeIds(buildRootPreviewCollapsedNodeIds(rawRoots));
+      nextCollapsedNodeIds = buildRootPreviewCollapsedNodeIds(rawRoots);
     } else if (fullscreen && effectiveViewMode === "enterprise" && enterpriseScope === "family") {
-      setCollapsedNodeIds(buildEnterprisePreviewCollapsedNodeIds(rawRoots));
+      nextCollapsedNodeIds = buildEnterprisePreviewCollapsedNodeIds(rawRoots);
     } else {
-      setCollapsedNodeIds(new Set());
+      nextCollapsedNodeIds = new Set();
     }
+
+    pendingCollapseViewportAlignmentKey.current = serializeCollapsedNodeIds(nextCollapsedNodeIds);
+    setCollapsedNodeIds(nextCollapsedNodeIds);
   }, [
     collapseStateStorageKey,
     effectiveViewMode,
@@ -2601,18 +2613,17 @@ export function OrgChart({
   }, [allNodes.length, resetGraphViewport]);
 
   useEffect(() => {
-    if (
-      hasAlignedAfterCollapseState.current ||
-      !hasInitializedCollapseState.current ||
-      allNodes.length === 0 ||
-      !containerRef.current
-    ) {
+    if (!hasInitializedCollapseState.current || allNodes.length === 0 || !containerRef.current) {
       return;
     }
 
-    hasAlignedAfterCollapseState.current = true;
+    if (pendingCollapseViewportAlignmentKey.current !== collapsedViewportAlignmentKey) {
+      return;
+    }
+
+    pendingCollapseViewportAlignmentKey.current = null;
     requestGraphViewportReset();
-  }, [allNodes.length, collapsedNodeIds, requestGraphViewportReset]);
+  }, [allNodes.length, collapsedViewportAlignmentKey, requestGraphViewportReset]);
 
   useEffect(() => {
     if (!graphFocusMode) return;
