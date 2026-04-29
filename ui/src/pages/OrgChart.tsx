@@ -2571,7 +2571,7 @@ export function OrgChart({
       const focusW = Math.max(maxX - minX, CARD_W + 96);
       const focusH = Math.max(maxY - minY, CARD_H + 96);
       const focusZoom = Math.min(
-        Math.max(Math.min((containerW - 96) / focusW, (containerH - 120) / focusH, 1), 0.72),
+        Math.max(Math.min((containerW - 96) / focusW, (containerH - 120) / focusH, 1), 0.85),
         1,
       );
 
