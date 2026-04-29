@@ -2562,7 +2562,7 @@ export function OrgChart({
 
     if (readableFullStructure) {
       if (allNodes.length === 0) return;
-      const focusNodes = allNodes.filter((node) => node.depth <= 1);
+      const focusNodes = allNodes.filter((node) => node.depth === 0);
       const nodesToFrame = focusNodes.length > 0 ? focusNodes : allNodes.slice(0, 1);
       const minX = Math.min(...nodesToFrame.map((node) => node.x)) - 96;
       const maxX = Math.max(...nodesToFrame.map((node) => node.x + CARD_W)) + 96;
