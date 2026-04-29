@@ -1327,6 +1327,7 @@ export function OrgChart({
   const dragStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
   const hasInitialized = useRef(false);
   const hasInitializedCollapseState = useRef(false);
+  const hasAlignedAfterCollapseState = useRef(false);
   const initialStoredViewMode = lockViewMode ?? readStoredOrgViewMode(initialViewMode);
 
   const [viewMode, setViewMode] = useState<OrgViewMode>(() => initialStoredViewMode);
@@ -1427,6 +1428,7 @@ export function OrgChart({
   useEffect(() => {
     hasInitialized.current = false;
     hasInitializedCollapseState.current = false;
+    hasAlignedAfterCollapseState.current = false;
   }, [collapseStateStorageKey, effectiveViewMode, enterpriseScope, selectedCompanyId]);
 
   useEffect(() => {
@@ -2597,6 +2599,20 @@ export function OrgChart({
     hasInitialized.current = true;
     resetGraphViewport();
   }, [allNodes.length, resetGraphViewport]);
+
+  useEffect(() => {
+    if (
+      hasAlignedAfterCollapseState.current ||
+      !hasInitializedCollapseState.current ||
+      allNodes.length === 0 ||
+      !containerRef.current
+    ) {
+      return;
+    }
+
+    hasAlignedAfterCollapseState.current = true;
+    requestGraphViewportReset();
+  }, [allNodes.length, collapsedNodeIds, requestGraphViewportReset]);
 
   useEffect(() => {
     if (!graphFocusMode) return;
