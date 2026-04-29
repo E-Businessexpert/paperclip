@@ -65,6 +65,8 @@ const GAP_Y = 84;
 const PADDING = 60;
 const COMPANY_GROUP_PADDING_X = 28;
 const COMPANY_GROUP_PADDING_Y = 24;
+const COMPANY_AGENT_GROUP_PADDING_X = 10;
+const COMPANY_AGENT_GROUP_PADDING_Y = 10;
 const COMPANY_GROUP_HEADER_H = 46;
 const COMPANY_TREE_CARD_W = 280;
 const COMPANY_TREE_CARD_H = 116;
@@ -1007,17 +1009,13 @@ function buildCompanyGroups(
   selectedCompanyId?: string | null,
   companyAccentById?: ReadonlyMap<string, string>,
 ): CompanyGroup[] {
-  const groups = new Map<
+  const buckets = new Map<
     string,
     {
       companyId?: string;
       companyName: string;
       external: boolean;
-      minX: number;
-      minY: number;
-      maxX: number;
-      maxY: number;
-      nodeCount: number;
+      nodes: LayoutNode[];
     }
   >();
 
@@ -1025,44 +1023,45 @@ function buildCompanyGroups(
     const companyName = node.companyName ?? "Unknown company";
     const key = companyGroupKey(node.companyId, companyName);
     const external = Boolean(node.externalToCompany) || !node.companyId;
-    const existing = groups.get(key);
-    const minX = node.x;
-    const minY = node.y;
-    const maxX = node.x + CARD_W;
-    const maxY = node.y + CARD_H;
+    const existing = buckets.get(key);
 
     if (!existing) {
-      groups.set(key, {
+      buckets.set(key, {
         companyId: node.companyId,
         companyName,
         external,
-        minX,
-        minY,
-        maxX,
-        maxY,
-        nodeCount: 1,
+        nodes: [node],
       });
       continue;
     }
 
-    existing.minX = Math.min(existing.minX, minX);
-    existing.minY = Math.min(existing.minY, minY);
-    existing.maxX = Math.max(existing.maxX, maxX);
-    existing.maxY = Math.max(existing.maxY, maxY);
-    existing.nodeCount += 1;
+    existing.nodes.push(node);
   }
 
-  return Array.from(groups.entries())
-    .map(([key, group]) => ({
+  const createGroup = (
+    key: string,
+    group: {
+      companyId?: string;
+      companyName: string;
+      external: boolean;
+    },
+    clusterNodes: LayoutNode[],
+  ): CompanyGroup => {
+    const minX = Math.min(...clusterNodes.map((node) => node.x));
+    const minY = Math.min(...clusterNodes.map((node) => node.y));
+    const maxX = Math.max(...clusterNodes.map((node) => node.x + CARD_W));
+    const maxY = Math.max(...clusterNodes.map((node) => node.y + CARD_H));
+
+    return {
       key,
       companyId: group.companyId,
       companyName: group.companyName,
-      x: Math.max(group.minX - COMPANY_GROUP_PADDING_X, 12),
-      y: Math.max(group.minY - COMPANY_GROUP_HEADER_H - COMPANY_GROUP_PADDING_Y, 12),
-      width: group.maxX - group.minX + COMPANY_GROUP_PADDING_X * 2,
+      x: Math.max(minX - COMPANY_AGENT_GROUP_PADDING_X, 12),
+      y: Math.max(minY - COMPANY_GROUP_HEADER_H - COMPANY_AGENT_GROUP_PADDING_Y, 12),
+      width: maxX - minX + COMPANY_AGENT_GROUP_PADDING_X * 2,
       height:
-        group.maxY - group.minY + COMPANY_GROUP_PADDING_Y * 2 + COMPANY_GROUP_HEADER_H,
-      nodeCount: group.nodeCount,
+        maxY - minY + COMPANY_AGENT_GROUP_PADDING_Y * 2 + COMPANY_GROUP_HEADER_H,
+      nodeCount: clusterNodes.length,
       external: group.external,
       accentColor: pickGroupAccent(
         key,
@@ -1071,7 +1070,41 @@ function buildCompanyGroups(
         group.companyId,
         companyAccentById,
       ),
-    }))
+    };
+  };
+
+  const groups: CompanyGroup[] = [];
+  for (const [key, group] of buckets.entries()) {
+    const nodesByDepth = new Map<number, LayoutNode[]>();
+    for (const node of group.nodes) {
+      const depthNodes = nodesByDepth.get(node.depth) ?? [];
+      depthNodes.push(node);
+      nodesByDepth.set(node.depth, depthNodes);
+    }
+
+    for (const depthNodes of nodesByDepth.values()) {
+      const sortedNodes = [...depthNodes].sort((left, right) => left.x - right.x);
+      let cluster: LayoutNode[] = [];
+      let clusterMaxX = Number.NEGATIVE_INFINITY;
+
+      for (const node of sortedNodes) {
+        const gapFromCluster = node.x - clusterMaxX;
+        if (cluster.length > 0 && gapFromCluster > GAP_X * 1.75) {
+          groups.push(createGroup(key, group, cluster));
+          cluster = [];
+        }
+
+        cluster.push(node);
+        clusterMaxX = Math.max(clusterMaxX, node.x + CARD_W);
+      }
+
+      if (cluster.length > 0) {
+        groups.push(createGroup(key, group, cluster));
+      }
+    }
+  }
+
+  return groups
     .sort((left, right) => (left.y === right.y ? left.x - right.x : left.y - right.y));
 }
 
@@ -3538,7 +3571,7 @@ export function OrgChart({
                 {enterpriseScope === "family" ? "Family-wide structure" : "Company structure"}
               </span>
               <span className="rounded-full border border-border/70 bg-background/75 px-2.5 py-1 dark:border-white/10 dark:bg-slate-950/70">
-                {companyGroups.length} compan{companyGroups.length === 1 ? "y" : "ies"}
+                {companyLegendItems.length} compan{companyLegendItems.length === 1 ? "y" : "ies"}
               </span>
               <span className="rounded-full border border-border/70 bg-background/75 px-2.5 py-1 dark:border-white/10 dark:bg-slate-950/70">
                 {filteredHierarchyEdges.length} reports-to links
@@ -4123,7 +4156,7 @@ export function OrgChart({
 
                     return (
                       <g
-                        key={group.key}
+                        key={`${group.key}:${group.x}:${group.y}:${group.width}:${group.height}`}
                         data-company-graph-group={group.companyId ?? group.key}
                         data-color={group.accentColor}
                         opacity={groupHighlighted ? 1 : 0.24}
