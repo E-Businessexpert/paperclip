@@ -766,11 +766,52 @@ function buildEnterprisePreviewCollapsedNodeIds(roots: OrgNode[]): Set<string> {
   return buildPreviewCollapsedNodeIds(roots, 2);
 }
 
+function collectCompanyBoundaryReports(
+  reports: OrgNode[],
+  parentCompanyId: string | null | undefined,
+  collapsedNodeIds: ReadonlySet<string>,
+): OrgNode[] {
+  const visibleReports: OrgNode[] = [];
+
+  for (const child of reports) {
+    const childCompanyId = child.companyId ?? null;
+    const crossesCompanyBoundary =
+      Boolean(parentCompanyId) && Boolean(childCompanyId) && childCompanyId !== parentCompanyId;
+
+    if (crossesCompanyBoundary) {
+      visibleReports.push({
+        ...child,
+        reports: collapsedNodeIds.has(child.id)
+          ? child.reports.map((grandchild) => ({
+              ...grandchild,
+              reports: collectCompanyBoundaryReports(
+                grandchild.reports,
+                grandchild.companyId ?? childCompanyId,
+                collapsedNodeIds,
+              ),
+            }))
+          : collectCompanyBoundaryReports(child.reports, childCompanyId, collapsedNodeIds),
+      });
+      continue;
+    }
+
+    visibleReports.push(
+      ...collectCompanyBoundaryReports(child.reports, parentCompanyId, collapsedNodeIds),
+    );
+  }
+
+  return visibleReports;
+}
+
 function applyCollapsedReports(node: OrgNode, collapsedNodeIds: ReadonlySet<string>): OrgNode {
   const reports = collapsedNodeIds.has(node.id)
     ? node.reports.map((child) => ({
         ...child,
-        reports: [],
+        reports: collectCompanyBoundaryReports(
+          child.reports,
+          child.companyId ?? node.companyId ?? null,
+          collapsedNodeIds,
+        ),
       }))
     : node.reports.map((child) => applyCollapsedReports(child, collapsedNodeIds));
 
