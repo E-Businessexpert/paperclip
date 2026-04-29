@@ -58,10 +58,10 @@ import { queryKeys } from "../lib/queryKeys";
 import { agentUrl, cn } from "../lib/utils";
 
 const CARD_W = 200;
-const CARD_H = 108;
+const CARD_H = 142;
 const GAP_X = 32;
 const FOREST_ROOT_GAP_X = 128;
-const GAP_Y = 84;
+const GAP_Y = 108;
 const PADDING = 60;
 const COMPANY_GROUP_PADDING_X = 28;
 const COMPANY_GROUP_PADDING_Y = 24;
@@ -768,7 +768,10 @@ function buildEnterprisePreviewCollapsedNodeIds(roots: OrgNode[]): Set<string> {
 
 function applyCollapsedReports(node: OrgNode, collapsedNodeIds: ReadonlySet<string>): OrgNode {
   const reports = collapsedNodeIds.has(node.id)
-    ? []
+    ? node.reports.map((child) => ({
+        ...child,
+        reports: [],
+      }))
     : node.reports.map((child) => applyCollapsedReports(child, collapsedNodeIds));
 
   return {
@@ -1313,6 +1316,7 @@ export function OrgChart({
   const [compactControlsCollapsed, setCompactControlsCollapsed] = useState(false);
   const [inspectorMinimized, setInspectorMinimized] = useState(defaultInspectorMinimized);
   const [collapsedNodeIds, setCollapsedNodeIds] = useState<Set<string>>(new Set());
+  const [expandedCardDetailIds, setExpandedCardDetailIds] = useState<Set<string>>(new Set());
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [dragging, setDragging] = useState(false);
@@ -1408,6 +1412,7 @@ export function OrgChart({
     setFiltersOpen(effectiveViewMode === "enterprise" && !compactFilters);
     setCompactControlsCollapsed(false);
     setInspectorMinimized(defaultInspectorMinimized);
+    setExpandedCardDetailIds(new Set());
   }, [
     compactFilters,
     defaultInspectorMinimized,
@@ -2825,6 +2830,18 @@ export function OrgChart({
       return next;
     });
   }, [persistCollapsedNodeIdsForCurrentScope]);
+
+  const toggleCardDetails = useCallback((nodeId: string) => {
+    setExpandedCardDetailIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(nodeId)) {
+        next.delete(nodeId);
+      } else {
+        next.add(nodeId);
+      }
+      return next;
+    });
+  }, []);
 
   const zoomAroundCenter = useCallback(
     (nextZoom: number) => {
@@ -4391,6 +4408,18 @@ export function OrgChart({
                     (effectiveViewMode === "enterprise" || Boolean(node.externalToCompany));
                   const showAgentText =
                     effectiveViewMode !== "enterprise" || wiringVisibility.showAgentNames;
+                  const compactAgentCard =
+                    fullscreen && compactFilters && effectiveViewMode === "enterprise";
+                  const cardDetailsExpanded =
+                    !compactAgentCard || expandedCardDetailIds.has(node.id);
+                  const cardHasHiddenDetails =
+                    compactAgentCard &&
+                    showAgentText &&
+                    Boolean(
+                      agent ||
+                        node.childCount > 0 ||
+                        graphNode?.secondaryLinkCount,
+                    );
 
                   return (
                     <div
@@ -4408,7 +4437,7 @@ export function OrgChart({
                       style={{
                         left: node.x,
                         top: node.y,
-                        minHeight: CARD_H,
+                        height: CARD_H,
                         width: CARD_W,
                         opacity: nodeHighlighted ? 1 : 0.34,
                         boxShadow: isFocusedAgent
@@ -4443,8 +4472,8 @@ export function OrgChart({
                             event.stopPropagation();
                             toggleNodeCollapse(node.id);
                           }}
-                          aria-label={node.collapsed ? "Expand subdivision" : "Collapse subdivision"}
-                          title={node.collapsed ? "Expand subdivision" : "Collapse subdivision"}
+                          aria-label={node.collapsed ? "Expand next level" : "Collapse next level"}
+                          title={node.collapsed ? "Expand next level" : "Collapse next level"}
                         >
                           {node.collapsed ? (
                             <ChevronRight className="h-3.5 w-3.5" />
@@ -4472,10 +4501,10 @@ export function OrgChart({
                         <div className="min-w-0 flex-1">
                           {showAgentText ? (
                             <>
-                              <div className="pr-9 text-sm font-semibold leading-tight text-foreground">
+                              <div className="line-clamp-2 pr-9 text-sm font-semibold leading-tight text-foreground">
                                 {node.name}
                               </div>
-                              <div className="mt-0.5 text-[11px] leading-tight text-muted-foreground">
+                              <div className="mt-0.5 line-clamp-2 text-[11px] leading-tight text-muted-foreground">
                                 {agent?.title ?? roleLabel(node.role)}
                               </div>
                             </>
@@ -4512,27 +4541,47 @@ export function OrgChart({
                             ) : null}
                           </div>
 
-                          {agent && showAgentText ? (
+                          {cardHasHiddenDetails ? (
+                            <button
+                              type="button"
+                              data-org-card-details-toggle
+                              className="absolute bottom-2 right-2 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-border/60 bg-background/86 text-foreground/70 shadow-sm backdrop-blur transition-colors hover:bg-accent hover:text-foreground dark:border-white/10 dark:bg-slate-950/78"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                toggleCardDetails(node.id);
+                              }}
+                              aria-label={cardDetailsExpanded ? "Hide card details" : "Show card details"}
+                              title={cardDetailsExpanded ? "Hide card details" : "Show card details"}
+                            >
+                              {cardDetailsExpanded ? (
+                                <ChevronDown className="h-3.5 w-3.5" />
+                              ) : (
+                                <ChevronRight className="h-3.5 w-3.5" />
+                              )}
+                            </button>
+                          ) : null}
+
+                          {agent && showAgentText && cardDetailsExpanded ? (
                             <div className="mt-1 text-[10px] font-mono leading-tight text-muted-foreground/60">
                               {getAdapterLabel(agent.adapterType)}
                             </div>
                           ) : null}
 
-                          {node.childCount > 0 ? (
+                          {node.childCount > 0 && cardDetailsExpanded ? (
                             <div className="mt-1 text-[10px] leading-tight text-foreground/70">
                               {node.collapsed
-                                ? `${node.childCount} subdivision${node.childCount === 1 ? "" : "s"} hidden`
+                                ? `${node.childCount} next-level subdivision${node.childCount === 1 ? "" : "s"} visible`
                                 : `${node.childCount} direct subdivision${node.childCount === 1 ? "" : "s"}`}
                             </div>
                           ) : null}
 
-                          {agent?.capabilities && showAgentText ? (
+                          {agent?.capabilities && showAgentText && cardDetailsExpanded ? (
                             <div className="mt-1 line-clamp-2 text-[10px] leading-tight text-muted-foreground/80">
                               {agent.capabilities}
                             </div>
                           ) : null}
 
-                          {graphNode && showAgentText ? (
+                          {graphNode && showAgentText && cardDetailsExpanded ? (
                             <div className="mt-1 text-[10px] leading-tight text-foreground/70">
                               {graphNode.secondaryLinkCount ?? 0} secondary link
                               {(graphNode.secondaryLinkCount ?? 0) === 1 ? "" : "s"}
