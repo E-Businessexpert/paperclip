@@ -771,53 +771,9 @@ function buildEnterprisePreviewCollapsedNodeIds(roots: OrgNode[]): Set<string> {
   return buildPreviewCollapsedNodeIds(roots, 2);
 }
 
-function collectCompanyBoundaryReports(
-  reports: OrgNode[],
-  parentCompanyId: string | null | undefined,
-  collapsedNodeIds: ReadonlySet<string>,
-): OrgNode[] {
-  const visibleReports: OrgNode[] = [];
-
-  for (const child of reports) {
-    const childCompanyId = child.companyId ?? null;
-    const crossesCompanyBoundary =
-      Boolean(parentCompanyId) && Boolean(childCompanyId) && childCompanyId !== parentCompanyId;
-
-    if (crossesCompanyBoundary) {
-      visibleReports.push({
-        ...child,
-        reports: collapsedNodeIds.has(child.id)
-          ? child.reports.map((grandchild) => ({
-              ...grandchild,
-              reports: collectCompanyBoundaryReports(
-                grandchild.reports,
-                grandchild.companyId ?? childCompanyId,
-                collapsedNodeIds,
-              ),
-            }))
-          : collectCompanyBoundaryReports(child.reports, childCompanyId, collapsedNodeIds),
-      });
-      continue;
-    }
-
-    visibleReports.push(
-      ...collectCompanyBoundaryReports(child.reports, parentCompanyId, collapsedNodeIds),
-    );
-  }
-
-  return visibleReports;
-}
-
 function applyCollapsedReports(node: OrgNode, collapsedNodeIds: ReadonlySet<string>): OrgNode {
   const reports = collapsedNodeIds.has(node.id)
-    ? node.reports.map((child) => ({
-        ...child,
-        reports: collectCompanyBoundaryReports(
-          child.reports,
-          child.companyId ?? node.companyId ?? null,
-          collapsedNodeIds,
-        ),
-      }))
+    ? []
     : node.reports.map((child) => applyCollapsedReports(child, collapsedNodeIds));
 
   return {
@@ -4677,8 +4633,8 @@ export function OrgChart({
                             event.stopPropagation();
                             toggleNodeCollapse(node.id);
                           }}
-                          aria-label={node.collapsed ? "Expand next level" : "Collapse next level"}
-                          title={node.collapsed ? "Expand next level" : "Collapse next level"}
+                          aria-label={node.collapsed ? "Expand branch" : "Collapse branch"}
+                          title={node.collapsed ? "Expand branch" : "Collapse branch"}
                         >
                           {node.collapsed ? (
                             <ChevronRight className="h-3.5 w-3.5" />
@@ -4774,8 +4730,8 @@ export function OrgChart({
 
                           {node.childCount > 0 && cardDetailsExpanded ? (
                             <div className="mt-1 text-[10px] leading-tight text-foreground/70">
-                              {node.collapsed
-                                ? `${node.childCount} next-level subdivision${node.childCount === 1 ? "" : "s"} visible`
+                          {node.collapsed
+                                ? `${node.childCount} direct subdivision${node.childCount === 1 ? "" : "s"} hidden`
                                 : `${node.childCount} direct subdivision${node.childCount === 1 ? "" : "s"}`}
                             </div>
                           ) : null}
