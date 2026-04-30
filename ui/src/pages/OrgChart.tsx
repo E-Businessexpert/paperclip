@@ -59,10 +59,10 @@ import { queryKeys } from "../lib/queryKeys";
 import { agentUrl, cn } from "../lib/utils";
 
 const CARD_W = 200;
-const CARD_H = 142;
+const CARD_H = 208;
 const GAP_X = 32;
 const FOREST_ROOT_GAP_X = 128;
-const GAP_Y = 108;
+const GAP_Y = 116;
 const PADDING = 60;
 const COMPANY_GROUP_PADDING_X = 28;
 const COMPANY_GROUP_PADDING_Y = 24;
@@ -2850,12 +2850,17 @@ export function OrgChart({
     setArchivedFilter("all");
     setErrorFilter("all");
     setCrossCompanyFilter("all");
+    const nextCollapsedNodeIds = new Set<string>();
+    setCollapsedNodeIds(nextCollapsedNodeIds);
+    persistStoredCollapsedNodeIds(collapseStateStorageKey, nextCollapsedNodeIds);
+    setExpandedCardDetailIds(new Set());
     setCompactControlsCollapsed(false);
     setFiltersOpen(false);
     setFocusTarget(null);
     setSelectedInspectorItem(null);
     requestGraphViewportReset();
   }, [
+    collapseStateStorageKey,
     requestGraphViewportReset,
   ]);
 
@@ -4696,9 +4701,9 @@ export function OrgChart({
                             {showCompanyBadge && !compactCardDetailsHidden ? (
                               <div
                                 data-card-company-badge
-                                className="inline-flex max-w-full rounded-full border border-foreground/10 bg-foreground/[0.05] px-2 py-0.5 text-[10px] leading-tight text-foreground/80"
+                                className="inline-flex max-w-[7.4rem] rounded-full border border-foreground/10 bg-foreground/[0.05] px-2 py-0.5 text-[10px] leading-tight text-foreground/80"
                               >
-                                {node.companyName}
+                                <span className="truncate">{node.companyName}</span>
                               </div>
                             ) : null}
                           </div>
