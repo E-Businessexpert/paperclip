@@ -1332,6 +1332,7 @@ export function OrgChart({
   const hasInitialized = useRef(false);
   const hasInitializedCollapseState = useRef(false);
   const pendingCollapseViewportAlignmentKey = useRef<string | null>(null);
+  const pendingCollapseFocusNodeId = useRef<string | null>(null);
   const initialStoredViewMode = lockViewMode ?? readStoredOrgViewMode(initialViewMode);
 
   const [viewMode, setViewMode] = useState<OrgViewMode>(() => initialStoredViewMode);
@@ -2687,6 +2688,21 @@ export function OrgChart({
     [layoutNodeMap],
   );
 
+  useEffect(() => {
+    const nodeId = pendingCollapseFocusNodeId.current;
+    if (!nodeId || !layoutNodeMap.has(nodeId)) return;
+
+    pendingCollapseFocusNodeId.current = null;
+    if (typeof window === "undefined") {
+      fitToNodeIds([nodeId]);
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      fitToNodeIds([nodeId]);
+    });
+  }, [collapsedViewportAlignmentKey, fitToNodeIds, layoutNodeMap]);
+
   const fitToCompanyGroupKeys = useCallback(
     (groupKeys: readonly string[]) => {
       if (!containerRef.current || groupKeys.length === 0) return;
@@ -2953,6 +2969,7 @@ export function OrgChart({
   );
 
   const toggleNodeCollapse = useCallback((nodeId: string) => {
+    pendingCollapseFocusNodeId.current = nodeId;
     setCollapsedNodeIds((previous) => {
       const next = new Set(previous);
       if (next.has(nodeId)) {
@@ -2976,6 +2993,13 @@ export function OrgChart({
       return next;
     });
   }, []);
+
+  const toggleAllCardDetails = useCallback(() => {
+    setExpandedCardDetailIds((previous) => {
+      if (previous.size > 0) return new Set();
+      return new Set(allNodes.map((node) => node.id));
+    });
+  }, [allNodes]);
 
   const zoomAroundCenter = useCallback(
     (nextZoom: number) => {
@@ -3156,6 +3180,7 @@ export function OrgChart({
   const graphPanelHeightClass = graphFocusMode
     ? "h-full min-h-0"
     : graphWorkspaceHeightClass;
+  const hasExpandedCardDetails = expandedCardDetailIds.size > 0;
 
   return (
     <div className={cn("flex min-h-full flex-col gap-3", fullscreen && "h-auto")}>
@@ -3249,7 +3274,7 @@ export function OrgChart({
               "isolate flex shrink-0 flex-wrap items-center gap-1.5 rounded-xl border border-border/70 bg-card px-2 py-1.5 shadow-sm dark:border-white/10 dark:bg-slate-950",
               fullscreen &&
                 compactFilters &&
-                "sticky top-0 z-50 shadow-[0_18px_44px_-30px_rgba(15,23,42,0.85)] ring-1 ring-background/80 dark:ring-slate-950/80",
+                "sticky top-0 z-[70] -mx-3 rounded-none border-x-0 border-t-0 bg-background px-3 shadow-[0_18px_44px_-30px_rgba(15,23,42,0.85)] ring-1 ring-background/80 dark:bg-slate-950 dark:ring-slate-950/80 md:-mx-5 md:px-5",
             )}
           >
             {compactFilters ? (
@@ -3714,6 +3739,19 @@ export function OrgChart({
                 {inspectorMinimized ? "Show inspector" : "Minimize inspector"}
               </Button>
             )}
+            <Button
+              data-card-details-toggle-all
+              size="sm"
+              variant="outline"
+              onClick={toggleAllCardDetails}
+            >
+              {hasExpandedCardDetails ? (
+                <EyeOff className="mr-1.5 h-3.5 w-3.5" />
+              ) : (
+                <Eye className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              {hasExpandedCardDetails ? "Hide card details" : "Show card details"}
+            </Button>
             <Button
               data-reset-enterprise-filters
               size="sm"
@@ -4589,6 +4627,9 @@ export function OrgChart({
                     <div
                       key={node.id}
                       data-org-card
+                      data-org-card-id={node.id}
+                      data-org-card-name={node.name}
+                      data-card-details-expanded={cardDetailsExpanded ? "true" : "false"}
                       data-collapsed={node.collapsed ? "true" : "false"}
                       className={cn(
                         "absolute cursor-pointer select-none overflow-hidden rounded-2xl border bg-gradient-to-br from-card/95 via-card to-muted/40 shadow-[0_18px_35px_-24px_rgba(15,23,42,0.55)] transition-[box-shadow,border-color,transform,opacity] duration-150 hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-[0_24px_50px_-28px_rgba(15,23,42,0.7)] dark:from-slate-950/92 dark:via-slate-950/88 dark:to-slate-900/72",
