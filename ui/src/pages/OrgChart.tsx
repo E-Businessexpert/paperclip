@@ -2850,22 +2850,13 @@ export function OrgChart({
     setArchivedFilter("all");
     setErrorFilter("all");
     setCrossCompanyFilter("all");
-    setWiringVisibility(createDefaultWiringVisibility(enterpriseScope, effectiveViewMode, startExpanded));
-    const nextCollapsedNodeIds = new Set<string>();
-    setCollapsedNodeIds(nextCollapsedNodeIds);
-    persistStoredCollapsedNodeIds(collapseStateStorageKey, nextCollapsedNodeIds);
-    setExpandedCardDetailIds(new Set());
     setCompactControlsCollapsed(false);
     setFiltersOpen(false);
     setFocusTarget(null);
     setSelectedInspectorItem(null);
     requestGraphViewportReset();
   }, [
-    effectiveViewMode,
-    enterpriseScope,
-    collapseStateStorageKey,
     requestGraphViewportReset,
-    startExpanded,
   ]);
 
   const persistCollapsedNodeIdsForCurrentScope = useCallback(
@@ -4570,6 +4561,7 @@ export function OrgChart({
                     fullscreen && compactFilters && effectiveViewMode === "enterprise";
                   const cardDetailsExpanded =
                     !compactAgentCard || expandedCardDetailIds.has(node.id);
+                  const compactCardDetailsHidden = compactAgentCard && !cardDetailsExpanded;
                   const cardHasHiddenDetails =
                     compactAgentCard &&
                     showAgentText &&
@@ -4675,12 +4667,14 @@ export function OrgChart({
                             </div>
                           )}
 
-                          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 pr-8">
                             {department ? (
                               <button
                                 type="button"
+                                data-card-department-chip
                                 className={cn(
                                   "inline-flex max-w-full rounded-full border px-2 py-0.5 text-[10px] leading-tight transition-colors",
+                                  compactCardDetailsHidden ? "max-w-[7.4rem] truncate" : null,
                                   focusTarget?.kind === "department" &&
                                     focusTarget.id === department.key
                                     ? "border-transparent bg-foreground text-background"
@@ -4691,12 +4685,19 @@ export function OrgChart({
                                   handleFocusDepartment(department.key);
                                 }}
                               >
-                                {department.shortLabel} · {department.label}
+                                <span className="truncate">
+                                  {compactCardDetailsHidden
+                                    ? department.label
+                                    : `${department.shortLabel} · ${department.label}`}
+                                </span>
                               </button>
                             ) : null}
 
-                            {showCompanyBadge ? (
-                              <div className="inline-flex max-w-full rounded-full border border-foreground/10 bg-foreground/[0.05] px-2 py-0.5 text-[10px] leading-tight text-foreground/80">
+                            {showCompanyBadge && !compactCardDetailsHidden ? (
+                              <div
+                                data-card-company-badge
+                                className="inline-flex max-w-full rounded-full border border-foreground/10 bg-foreground/[0.05] px-2 py-0.5 text-[10px] leading-tight text-foreground/80"
+                              >
                                 {node.companyName}
                               </div>
                             ) : null}
