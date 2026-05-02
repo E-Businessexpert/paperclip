@@ -525,6 +525,111 @@ function colorSurfaceStyle(color?: string | null): React.CSSProperties | undefin
   };
 }
 
+function CompanyFilterMenu({
+  allLabel,
+  colorsById,
+  dataFilter,
+  onValueChange,
+  options,
+  triggerClassName,
+  value,
+}: {
+  allLabel: string;
+  colorsById: ReadonlyMap<string, string>;
+  dataFilter?: string;
+  onValueChange: (value: string) => void;
+  options: CompanyOption[];
+  triggerClassName: string;
+  value: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const selectedCompany = options.find((option) => option.id === value);
+  const selectedColor = selectedCompany ? colorsById.get(selectedCompany.id) : undefined;
+  const selectedLabel = selectedCompany ? formatCompanyOptionLabel(selectedCompany) : allLabel;
+
+  const handleSelect = (nextValue: string) => {
+    onValueChange(nextValue);
+    setOpen(false);
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-expanded={open}
+          className={cn(
+            "inline-flex items-center gap-2 rounded-md border text-left shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
+            triggerClassName,
+          )}
+          data-enterprise-filter={dataFilter}
+          data-filter-color={selectedColor ?? ""}
+          style={colorSurfaceStyle(selectedColor)}
+        >
+          <span className="min-w-0 flex-1 truncate">{selectedLabel}</span>
+          <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        sideOffset={6}
+        className="z-[95] w-[22rem] max-w-[calc(100vw-1.5rem)] rounded-xl border border-border/80 bg-popover p-1 text-popover-foreground shadow-2xl backdrop-blur"
+        data-company-filter-menu={dataFilter}
+        role="listbox"
+      >
+        <button
+          type="button"
+          role="option"
+          aria-selected={value === ALL_COMPANIES_FILTER}
+          className={cn(
+            "flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground",
+            value === ALL_COMPANIES_FILTER && "bg-accent/70 text-accent-foreground",
+          )}
+          data-company-filter-option={ALL_COMPANIES_FILTER}
+          onClick={() => handleSelect(ALL_COMPANIES_FILTER)}
+        >
+          <span className="truncate">{allLabel}</span>
+          {value === ALL_COMPANIES_FILTER ? (
+            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              Selected
+            </span>
+          ) : null}
+        </button>
+
+        <div className="mt-1 max-h-[22rem] space-y-1 overflow-y-auto pr-1">
+          {options.map((option) => {
+            const optionColor = colorsById.get(option.id) ?? defaultDotColor;
+            const selected = option.id === value;
+
+            return (
+              <button
+                key={`company-filter-menu:${dataFilter ?? "company"}:${option.id}`}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                className={cn(
+                  "flex w-full items-center justify-between gap-2 rounded-lg border border-transparent px-3 py-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground",
+                  selected && "ring-1 ring-foreground/25",
+                )}
+                data-company-filter-option={option.id}
+                onClick={() => handleSelect(option.id)}
+                style={colorSurfaceStyle(optionColor)}
+              >
+                <ColorLabel color={optionColor} label={formatCompanyOptionLabel(option)} />
+                {selected ? (
+                  <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                    Selected
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 const inspectorPermissionDescriptors: readonly PermissionDescriptor[] = [
   {
     key: "canCreateAgents",
@@ -3119,14 +3224,6 @@ export function OrgChart({
     "h-7 w-[8.75rem] justify-between border-border/70 bg-background/85 px-2 text-[11px]";
   const compactWideSelectTriggerClass =
     "h-7 w-[11.25rem] justify-between border-border/70 bg-background/85 px-2 text-[11px]";
-  const companyAFilterColor =
-    companyAFilter === ALL_COMPANIES_FILTER
-      ? undefined
-      : companyLegendColorById.get(companyAFilter);
-  const companyBFilterColor =
-    companyBFilter === ALL_COMPANIES_FILTER
-      ? undefined
-      : companyLegendColorById.get(companyBFilter);
   const relationshipFilterColor =
     relationshipCategoryFilter === "all"
       ? undefined
@@ -3304,31 +3401,15 @@ export function OrgChart({
                     Filters
                   </span>
 
-                  <Select value={companyAFilter} onValueChange={setCompanyAFilter}>
-                    <SelectTrigger
-                      className={compactWideSelectTriggerClass}
-                      data-enterprise-filter="company-a"
-                      data-filter-color={companyAFilterColor ?? ""}
-                      style={colorSurfaceStyle(companyAFilterColor)}
-                    >
-                      <SelectValue placeholder="Company A" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={ALL_COMPANIES_FILTER}>Any company A</SelectItem>
-                      {companyOptions.map((option) => (
-                        <SelectItem
-                          key={`compact-company-a:${option.id}`}
-                          value={option.id}
-                          style={colorSurfaceStyle(companyLegendColorById.get(option.id))}
-                        >
-                          <ColorLabel
-                            color={companyLegendColorById.get(option.id) ?? defaultDotColor}
-                            label={formatCompanyOptionLabel(option)}
-                          />
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <CompanyFilterMenu
+                    allLabel="Any company A"
+                    colorsById={companyLegendColorById}
+                    dataFilter="company-a"
+                    onValueChange={setCompanyAFilter}
+                    options={companyOptions}
+                    triggerClassName={compactWideSelectTriggerClass}
+                    value={companyAFilter}
+                  />
 
                   <Select value={relationshipDirectionFilter} onValueChange={(value) => setRelationshipDirectionFilter(value as RelationshipDirectionFilter)}>
                     <SelectTrigger className={compactSelectTriggerClass}>
@@ -3341,30 +3422,15 @@ export function OrgChart({
                     </SelectContent>
                   </Select>
 
-                  <Select value={companyBFilter} onValueChange={setCompanyBFilter}>
-                    <SelectTrigger
-                      className={compactWideSelectTriggerClass}
-                      data-filter-color={companyBFilterColor ?? ""}
-                      style={colorSurfaceStyle(companyBFilterColor)}
-                    >
-                      <SelectValue placeholder="Company B" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={ALL_COMPANIES_FILTER}>Any company B</SelectItem>
-                      {companyOptions.map((option) => (
-                        <SelectItem
-                          key={`compact-company-b:${option.id}`}
-                          value={option.id}
-                          style={colorSurfaceStyle(companyLegendColorById.get(option.id))}
-                        >
-                          <ColorLabel
-                            color={companyLegendColorById.get(option.id) ?? defaultDotColor}
-                            label={formatCompanyOptionLabel(option)}
-                          />
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <CompanyFilterMenu
+                    allLabel="Any company B"
+                    colorsById={companyLegendColorById}
+                    dataFilter="company-b"
+                    onValueChange={setCompanyBFilter}
+                    options={companyOptions}
+                    triggerClassName={compactWideSelectTriggerClass}
+                    value={companyBFilter}
+                  />
 
                   <Select
                     value={relationshipCategoryFilter}
@@ -3841,36 +3907,28 @@ export function OrgChart({
                 <div className="mt-3 space-y-3">
                   <div className="space-y-1.5">
                     <div className="text-[11px] font-medium text-foreground/80">Company A</div>
-                    <Select value={companyAFilter} onValueChange={setCompanyAFilter}>
-                      <SelectTrigger className="w-full justify-between bg-background/80">
-                        <SelectValue placeholder="Select company A" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={ALL_COMPANIES_FILTER}>Any company</SelectItem>
-                        {companyOptions.map((option) => (
-                          <SelectItem key={`company-a:${option.id}`} value={option.id}>
-                            {formatCompanyOptionLabel(option)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <CompanyFilterMenu
+                      allLabel="Any company"
+                      colorsById={companyLegendColorById}
+                      dataFilter="company-a-panel"
+                      onValueChange={setCompanyAFilter}
+                      options={companyOptions}
+                      triggerClassName="h-9 w-full justify-between bg-background/80 px-3 py-2 text-sm"
+                      value={companyAFilter}
+                    />
                   </div>
 
                   <div className="space-y-1.5">
                     <div className="text-[11px] font-medium text-foreground/80">Company B</div>
-                    <Select value={companyBFilter} onValueChange={setCompanyBFilter}>
-                      <SelectTrigger className="w-full justify-between bg-background/80">
-                        <SelectValue placeholder="Select company B" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={ALL_COMPANIES_FILTER}>Any company</SelectItem>
-                        {companyOptions.map((option) => (
-                          <SelectItem key={`company-b:${option.id}`} value={option.id}>
-                            {formatCompanyOptionLabel(option)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <CompanyFilterMenu
+                      allLabel="Any company"
+                      colorsById={companyLegendColorById}
+                      dataFilter="company-b-panel"
+                      onValueChange={setCompanyBFilter}
+                      options={companyOptions}
+                      triggerClassName="h-9 w-full justify-between bg-background/80 px-3 py-2 text-sm"
+                      value={companyBFilter}
+                    />
                   </div>
 
                   <div className="space-y-1.5">
