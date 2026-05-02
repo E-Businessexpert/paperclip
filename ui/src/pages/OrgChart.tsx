@@ -291,6 +291,7 @@ const WIRING_VISIBILITY_OPTIONS: Array<{
 interface CompanyOption {
   id: string;
   name: string;
+  issuePrefix?: string;
 }
 
 interface CompanyAggregateEdge {
@@ -675,6 +676,10 @@ function persistStoredCollapsedNodeIds(storageKey: string | null, collapsedNodeI
 
 function serializeCollapsedNodeIds(collapsedNodeIds: ReadonlySet<string>) {
   return Array.from(collapsedNodeIds).sort().join("|");
+}
+
+function formatCompanyOptionLabel(option: CompanyOption) {
+  return option.issuePrefix ? `${option.issuePrefix} · ${option.name}` : option.name;
 }
 
 function createDefaultWiringVisibility(
@@ -1491,25 +1496,27 @@ export function OrgChart({
   }, [enterpriseGraph]);
 
   const companyOptions = useMemo<CompanyOption[]>(() => {
-    const presentCompanies = new Map<string, string>();
-    for (const node of enterpriseGraph?.nodes ?? []) {
-      if (!node.companyId) continue;
-      presentCompanies.set(node.companyId, node.companyName ?? node.name);
-    }
-
-    const options = companies
-      .filter((company) => presentCompanies.has(company.id))
-      .map((company) => ({
+    const optionById = new Map<string, CompanyOption>();
+    for (const company of companies) {
+      optionById.set(company.id, {
         id: company.id,
         name: company.name,
-      }));
-
-    for (const [companyId, companyName] of presentCompanies.entries()) {
-      if (options.some((option) => option.id === companyId)) continue;
-      options.push({ id: companyId, name: companyName });
+        issuePrefix: company.issuePrefix,
+      });
     }
 
-    return options.sort((left, right) => left.name.localeCompare(right.name));
+    for (const node of enterpriseGraph?.nodes ?? []) {
+      if (!node.companyId) continue;
+      if (optionById.has(node.companyId)) continue;
+      optionById.set(node.companyId, {
+        id: node.companyId,
+        name: node.companyName ?? node.name,
+      });
+    }
+
+    return Array.from(optionById.values()).sort((left, right) =>
+      formatCompanyOptionLabel(left).localeCompare(formatCompanyOptionLabel(right)),
+    );
   }, [companies, enterpriseGraph]);
   const companyAccentById = useMemo(
     () =>
@@ -2149,15 +2156,21 @@ export function OrgChart({
     [companyAFilter, companyBFilter, companyGroupsMap, companyOptions],
   );
 
+  const companyAOption = companyOptions.find((option) => option.id === companyAFilter);
+  const companyBOption = companyOptions.find((option) => option.id === companyBFilter);
   const companyAName =
     companyAFilter === ALL_COMPANIES_FILTER
       ? "Any company"
-      : companyOptions.find((option) => option.id === companyAFilter)?.name ?? companyAFilter;
+      : companyAOption
+        ? formatCompanyOptionLabel(companyAOption)
+        : companyAFilter;
 
   const companyBName =
     companyBFilter === ALL_COMPANIES_FILTER
       ? "Any company"
-      : companyOptions.find((option) => option.id === companyBFilter)?.name ?? companyBFilter;
+      : companyBOption
+        ? formatCompanyOptionLabel(companyBOption)
+        : companyBFilter;
 
   const relationshipDirectionLabel =
     relationshipDirectionFilter === "downstream"
@@ -3005,14 +3018,16 @@ export function OrgChart({
     }
 
     if (companyAFilter !== ALL_COMPANIES_FILTER) {
+      const company = companyOptions.find((option) => option.id === companyAFilter);
       relationshipFilterParts.push(
-        `A:${companyOptions.find((option) => option.id === companyAFilter)?.name ?? companyAFilter}`,
+        `A:${company ? formatCompanyOptionLabel(company) : companyAFilter}`,
       );
     }
 
     if (companyBFilter !== ALL_COMPANIES_FILTER) {
+      const company = companyOptions.find((option) => option.id === companyBFilter);
       relationshipFilterParts.push(
-        `B:${companyOptions.find((option) => option.id === companyBFilter)?.name ?? companyBFilter}`,
+        `B:${company ? formatCompanyOptionLabel(company) : companyBFilter}`,
       );
     }
 
@@ -3308,7 +3323,7 @@ export function OrgChart({
                         >
                           <ColorLabel
                             color={companyLegendColorById.get(option.id) ?? defaultDotColor}
-                            label={option.name}
+                            label={formatCompanyOptionLabel(option)}
                           />
                         </SelectItem>
                       ))}
@@ -3344,7 +3359,7 @@ export function OrgChart({
                         >
                           <ColorLabel
                             color={companyLegendColorById.get(option.id) ?? defaultDotColor}
-                            label={option.name}
+                            label={formatCompanyOptionLabel(option)}
                           />
                         </SelectItem>
                       ))}
@@ -3569,7 +3584,7 @@ export function OrgChart({
                       style={colorSurfaceStyle(item.color)}
                     >
                       <ColorDot color={item.color} className="h-2 w-2" />
-                      <span className="max-w-[9.5rem] truncate">{item.name}</span>
+                      <span className="max-w-[12rem] truncate">{formatCompanyOptionLabel(item)}</span>
                     </span>
                   ))}
                   <span className="ml-1 shrink-0 text-muted-foreground">Lines</span>
@@ -3834,7 +3849,7 @@ export function OrgChart({
                         <SelectItem value={ALL_COMPANIES_FILTER}>Any company</SelectItem>
                         {companyOptions.map((option) => (
                           <SelectItem key={`company-a:${option.id}`} value={option.id}>
-                            {option.name}
+                            {formatCompanyOptionLabel(option)}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -3851,7 +3866,7 @@ export function OrgChart({
                         <SelectItem value={ALL_COMPANIES_FILTER}>Any company</SelectItem>
                         {companyOptions.map((option) => (
                           <SelectItem key={`company-b:${option.id}`} value={option.id}>
-                            {option.name}
+                            {formatCompanyOptionLabel(option)}
                           </SelectItem>
                         ))}
                       </SelectContent>
