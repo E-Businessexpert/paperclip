@@ -56,7 +56,7 @@ export function FullStructurePage() {
       : "/dashboard";
 
   return (
-    <div className="h-[100dvh] overflow-y-auto overscroll-contain bg-background px-3 pb-3 pt-0 md:px-5 md:pb-5">
+    <div className="h-[100dvh] overflow-hidden overscroll-none bg-background px-3 pb-3 pt-0 md:px-5 md:pb-5">
       <OrgChart
         fullscreen
         initialViewMode="enterprise"

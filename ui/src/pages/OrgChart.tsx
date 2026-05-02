@@ -2794,7 +2794,8 @@ export function OrgChart({
 
   const handleWheel = useCallback(
     (event: WheelEvent) => {
-      if (fullscreen && !event.ctrlKey && !event.metaKey) {
+      const wheelZoomsGraph = fullscreen && compactFilters;
+      if (!wheelZoomsGraph && fullscreen && !event.ctrlKey && !event.metaKey) {
         return;
       }
 
@@ -2816,7 +2817,7 @@ export function OrgChart({
       });
       setZoom(nextZoom);
     },
-    [fullscreen, pan, zoom],
+    [compactFilters, fullscreen, pan, zoom],
   );
 
   useEffect(() => {
@@ -2826,6 +2827,25 @@ export function OrgChart({
     container.addEventListener("wheel", handleWheel, { passive: false });
     return () => container.removeEventListener("wheel", handleWheel);
   }, [handleWheel]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || typeof ResizeObserver === "undefined") return;
+
+    let frameId = 0;
+    const observer = new ResizeObserver(() => {
+      window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(() => {
+        resetGraphViewport();
+      });
+    });
+
+    observer.observe(container);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      observer.disconnect();
+    };
+  }, [resetGraphViewport]);
 
   const handleViewModeChange = useCallback(
     (nextViewMode: OrgViewMode) => {
@@ -3122,7 +3142,7 @@ export function OrgChart({
         : undefined;
   const graphWorkspaceHeightClass =
     fullscreen && compactFilters
-      ? "min-h-[760px] md:min-h-[920px] xl:min-h-[1040px]"
+      ? "min-h-0 flex-1"
       : fullscreen
         ? "min-h-[78dvh]"
         : "min-h-[440px]";
@@ -3135,7 +3155,7 @@ export function OrgChart({
   const hasExpandedCardDetails = expandedCardDetailIds.size > 0;
 
   return (
-    <div className={cn("flex min-h-full flex-col gap-3", fullscreen && "h-auto")}>
+    <div className={cn("flex min-h-full flex-col gap-3", fullscreen && "h-full min-h-0 overflow-hidden")}>
       {showBackButton ? (
         <div className="flex shrink-0 items-center justify-between gap-3 rounded-2xl border border-border/70 bg-gradient-to-r from-card/95 via-card/90 to-muted/55 px-4 py-3 shadow-sm dark:border-white/10 dark:from-slate-950/92 dark:via-slate-950/86 dark:to-slate-900/72">
           <div className="flex min-w-0 items-center gap-3">
@@ -4210,7 +4230,7 @@ export function OrgChart({
             )}
             style={{ cursor: dragging ? "grabbing" : "grab" }}
             data-graph-zoom={zoom.toFixed(4)}
-            data-graph-shortcut="ctrl-wheel-zoom"
+            data-graph-shortcut={fullscreen && compactFilters ? "wheel-zoom" : "ctrl-wheel-zoom"}
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
@@ -4268,7 +4288,7 @@ export function OrgChart({
               data-graph-shortcuts
               className="pointer-events-none -ml-20 mt-1 w-28 rounded-xl border border-border/70 bg-background/90 px-2 py-1 text-center text-[10px] font-medium text-foreground/75 shadow-sm backdrop-blur dark:border-white/10 dark:bg-slate-950/82"
             >
-              Ctrl + wheel zoom
+              {fullscreen && compactFilters ? "Wheel zoom" : "Ctrl + wheel zoom"}
             </div>
           </div>
 
