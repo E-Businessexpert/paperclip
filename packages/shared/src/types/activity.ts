@@ -2,7 +2,7 @@ export interface ActivityEvent {
   id: string;
   companyId: string;
   projectId: string | null;
-  actorType: "agent" | "user" | "system";
+  actorType: "agent" | "user" | "system" | "plugin";
   actorId: string;
   action: string;
   entityType: string;

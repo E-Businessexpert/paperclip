@@ -43,6 +43,19 @@ This starts:
 
 `pnpm dev` and `pnpm dev:once` are now idempotent for the current repo and instance: if the matching Paperclip dev runner is already alive, Paperclip reports the existing process instead of starting a duplicate.
 
+Issue execution may also use project execution workspace policies and workspace runtime services for per-project worktrees, preview servers, and managed dev commands. Configure those through the project workspace/runtime surfaces rather than starting long-running unmanaged processes when a task needs a reusable service.
+
+## Storybook
+
+The board UI Storybook keeps stories and Storybook config under `ui/storybook/` so component review files stay out of the app source routes.
+
+```sh
+pnpm storybook
+pnpm build-storybook
+```
+
+These run the `@paperclipai/ui` Storybook on port `6006` and build the static output to `ui/storybook-static/`.
+
 Inspect or stop the current repo's managed dev runner:
 
 ```sh
@@ -78,6 +91,31 @@ Allow additional private hostnames (for example custom Tailscale hostnames):
 ```sh
 pnpm paperclipai allowed-hostname dotta-macbook-pro
 ```
+
+## Test Commands
+
+Use the cheap local default unless you are specifically working on browser flows:
+
+```sh
+pnpm test
+```
+
+`pnpm test` runs the Vitest suite only. For interactive Vitest watch mode use:
+
+```sh
+pnpm test:watch
+```
+
+Browser suites stay separate:
+
+```sh
+pnpm test:e2e
+pnpm test:release-smoke
+```
+
+These browser suites are intended for targeted local verification and CI, not the default agent/human test command.
+
+For normal issue work, start with the smallest targeted check that proves the change. Reserve repo-wide typecheck/build/test runs for PR-ready handoff or changes broad enough that narrow checks do not cover the risk.
 
 ## One-Command Local Run
 
@@ -160,6 +198,8 @@ For `codex_local`, Paperclip also manages a per-company Codex home under the ins
 
 If the `codex` CLI is not installed or not on `PATH`, `codex_local` agent runs fail at execution time with a clear adapter error. Quota polling uses a short-lived `codex app-server` subprocess: when `codex` cannot be spawned, that provider reports `ok: false` in aggregated quota results and the API server keeps running (it must not exit on a missing binary).
 
+Local adapters require their corresponding CLI/session setup on the machine running Paperclip. External adapters are installed through the adapter/plugin flow and should not require hardcoded imports in `server/` or `ui/`.
+
 ## Worktree-local Instances
 
 When developing from multiple git worktrees, do not point two Paperclip servers at the same embedded PostgreSQL data directory.
@@ -186,6 +226,8 @@ Seed modes:
 - `full` makes a full logical clone of the source instance
 - `--no-seed` creates an empty isolated instance
 
+Seeded worktree instances quarantine copied live execution by default for both `minimal` and `full` seeds. During restore, Paperclip disables copied agent timer heartbeats, resets copied `running` agents to `idle`, blocks and unassigns copied agent-owned `in_progress` issues, and unassigns copied agent-owned `todo`/`in_review` issues. This keeps a freshly booted worktree from starting agents for work already owned by the source instance. Pass `--preserve-live-work` only when you intentionally want the isolated worktree to resume copied assignments.
+
 After `worktree init`, both the server and the CLI auto-load the repo-local `.paperclip/.env` when run inside that worktree, so normal commands like `pnpm dev`, `paperclipai doctor`, and `paperclipai db:backup` stay scoped to the worktree instance.
 
 `pnpm dev` now fails fast in a linked git worktree when `.paperclip/.env` is missing, instead of silently booting against the default instance/port. If that happens, run `paperclipai worktree init` in the worktree first.
@@ -199,6 +241,8 @@ That repo-local env also sets:
 - `PAPERCLIP_WORKTREE_COLOR=<hex-color>`
 
 The server/UI use those values for worktree-specific branding such as the top banner and dynamically colored favicon.
+Authenticated worktree servers also use the `PAPERCLIP_INSTANCE_ID` value to scope Better Auth cookie names.
+Browser cookies are shared by host rather than port, so this prevents logging into one `127.0.0.1:<port>` worktree from replacing another worktree server's session cookie.
 
 Print shell exports explicitly when needed:
 
@@ -239,13 +283,40 @@ paperclipai worktree init --force
 Repair an already-created repo-managed worktree and reseed its isolated instance from the main default install:
 
 ```sh
-cd ~/.paperclip/worktrees/PAP-884-ai-commits-component
+cd /path/to/paperclip/.paperclip/worktrees/PAP-884-ai-commits-component
 pnpm paperclipai worktree init --force --seed-mode minimal \
   --name PAP-884-ai-commits-component \
   --from-config ~/.paperclip/instances/default/config.json
 ```
 
 That rewrites the worktree-local `.paperclip/config.json` + `.paperclip/.env`, recreates the isolated instance under `~/.paperclip-worktrees/instances/<worktree-id>/`, and preserves the git worktree contents themselves.
+
+For an already-created worktree where you want the CLI to decide whether to rebuild missing worktree metadata or just reseed the isolated DB, use `worktree repair`.
+
+**`pnpm paperclipai worktree repair [options]`** — Repair the current linked worktree by default, or create/repair a named linked worktree under `.paperclip/worktrees/` when `--branch` is provided. The command never targets the primary checkout unless you explicitly pass `--branch`.
+
+| Option | Description |
+|---|---|
+| `--branch <name>` | Existing branch/worktree selector to repair, or a branch name to create under `.paperclip/worktrees` |
+| `--home <path>` | Home root for worktree instances (default: `~/.paperclip-worktrees`) |
+| `--from-config <path>` | Source config.json to seed from |
+| `--from-data-dir <path>` | Source `PAPERCLIP_HOME` used when deriving the source config |
+| `--from-instance <id>` | Source instance id when deriving the source config (default: `default`) |
+| `--seed-mode <mode>` | Seed profile: `minimal` or `full` (default: `minimal`) |
+| `--no-seed` | Repair metadata only when bootstrapping a missing worktree config |
+| `--allow-live-target` | Override the guard that requires the target worktree DB to be stopped first |
+
+Examples:
+
+```sh
+# From inside a linked worktree, rebuild missing .paperclip metadata and reseed it from the default instance.
+cd /path/to/paperclip/.paperclip/worktrees/PAP-1132-assistant-ui-pap-1131-make-issues-comments-be-like-a-chat
+pnpm paperclipai worktree repair
+
+# From the primary checkout, create or repair a linked worktree for a branch under .paperclip/worktrees/.
+cd /path/to/paperclip
+pnpm paperclipai worktree repair --branch PAP-1132-assistant-ui-pap-1131-make-issues-comments-be-like-a-chat
+```
 
 For an already-created worktree where you want to keep the existing repo-local config/env and only overwrite the isolated database, use `worktree reseed` instead. Stop the target worktree's Paperclip server first so the command can replace the DB safely.
 
@@ -350,7 +421,9 @@ If you set `DATABASE_URL`, the server will use that instead of embedded PostgreS
 
 ## Automatic DB Backups
 
-Paperclip can run automatic DB backups on a timer. Defaults:
+Paperclip can run automatic logical database backups on a timer. These backups cover
+non-system database schemas, including migration history and plugin-owned database
+schemas. Defaults:
 
 - enabled
 - every 60 minutes
@@ -377,6 +450,10 @@ Environment overrides:
 - `PAPERCLIP_DB_BACKUP_INTERVAL_MINUTES=<minutes>`
 - `PAPERCLIP_DB_BACKUP_RETENTION_DAYS=<days>`
 - `PAPERCLIP_DB_BACKUP_DIR=/absolute/or/~/path`
+
+DB backups are not full instance filesystem backups. For full local disaster
+recovery, also back up local storage files and the local encrypted secrets key if
+those providers are enabled.
 
 ## Secrets in Dev
 

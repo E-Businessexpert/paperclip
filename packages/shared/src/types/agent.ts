@@ -1,5 +1,6 @@
 import type {
   AgentAdapterType,
+  ModelProfileKey,
   PauseReason,
   AgentRole,
   AgentStatus,
@@ -682,6 +683,16 @@ export interface AgentMetadataRecord extends Record<string, unknown> {
   enterpriseRelationships?: AgentEnterpriseRelationshipsRecord;
 }
 
+export interface AgentModelProfileConfig {
+  enabled?: boolean;
+  label?: string;
+  adapterConfig: Record<string, unknown>;
+}
+
+export interface AgentRuntimeConfig extends Record<string, unknown> {
+  modelProfiles?: Partial<Record<ModelProfileKey, AgentModelProfileConfig>>;
+}
+
 export type AgentInstructionsBundleMode = "managed" | "external";
 
 export interface AgentInstructionsFileSummary {
@@ -743,7 +754,8 @@ export interface Agent {
   capabilities: string | null;
   adapterType: AgentAdapterType;
   adapterConfig: Record<string, unknown>;
-  runtimeConfig: Record<string, unknown>;
+  runtimeConfig: AgentRuntimeConfig;
+  defaultEnvironmentId?: string | null;
   budgetMonthlyCents: number;
   spentMonthlyCents: number;
   pauseReason: PauseReason | null;
