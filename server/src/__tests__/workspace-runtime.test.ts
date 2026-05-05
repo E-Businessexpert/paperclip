@@ -50,6 +50,8 @@ const execFileAsync = promisify(execFile);
 const leasedRunIds = new Set<string>();
 const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();
 const describeEmbeddedPostgres = embeddedPostgresSupport.supported ? describe : describe.skip;
+const describePosixGitWorktreeRuntime = process.platform === "win32" ? describe.skip : describe;
+const describeRuntimeServiceProcesses = process.platform === "win32" ? describe.skip : describe;
 
 if (!embeddedPostgresSupport.supported) {
   console.warn(
@@ -303,7 +305,7 @@ describe("ensureServerWorkspaceLinksCurrent", () => {
   });
 });
 
-describe("realizeExecutionWorkspace", () => {
+describePosixGitWorktreeRuntime("realizeExecutionWorkspace", () => {
   it("creates and reuses a git worktree for an issue-scoped branch", async () => {
     const repoRoot = await createTempRepo();
 
@@ -2045,7 +2047,7 @@ describe("realizeExecutionWorkspace", () => {
   });
 });
 
-describe("ensureRuntimeServicesForRun", () => {
+describeRuntimeServiceProcesses("ensureRuntimeServicesForRun", () => {
   it("leaves manual runtime services untouched during agent runs", async () => {
     const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-runtime-manual-"));
     const workspace = buildWorkspace(workspaceRoot);

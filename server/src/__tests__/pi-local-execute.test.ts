@@ -4,7 +4,30 @@ import os from "node:os";
 import path from "node:path";
 import { execute } from "@paperclipai/adapter-pi-local/server";
 
-async function writeFakePiCommand(commandPath: string): Promise<void> {
+async function writePortableNodeCommand(commandPath: string, script: string): Promise<string> {
+  if (process.platform !== "win32") {
+    await fs.writeFile(commandPath, script, "utf8");
+    await fs.chmod(commandPath, 0o755);
+    return commandPath;
+  }
+
+  const scriptPath = `${commandPath}.cjs`;
+  const shimPath = `${commandPath}.cmd`;
+  await fs.writeFile(scriptPath, script, "utf8");
+  await fs.writeFile(
+    shimPath,
+    [
+      "@echo off",
+      `"${process.execPath}" "${scriptPath}" %*`,
+      "exit /b %ERRORLEVEL%",
+      "",
+    ].join("\r\n"),
+    "utf8",
+  );
+  return shimPath;
+}
+
+async function writeFakePiCommand(commandPath: string): Promise<string> {
   const script = `#!/usr/bin/env node
 if (process.argv.includes("--list-models")) {
   console.log("provider  model");
@@ -23,11 +46,10 @@ console.log(JSON.stringify({
 }));
 process.exit(0);
 `;
-  await fs.writeFile(commandPath, script, "utf8");
-  await fs.chmod(commandPath, 0o755);
+  return writePortableNodeCommand(commandPath, script);
 }
 
-async function writeEnvDumpPiCommand(commandPath: string, envDumpPath: string): Promise<void> {
+async function writeEnvDumpPiCommand(commandPath: string, envDumpPath: string): Promise<string> {
   const script = `#!/usr/bin/env node
 const fs = require("node:fs");
 if (process.argv.includes("--list-models")) {
@@ -42,17 +64,15 @@ console.log(JSON.stringify({ type: "turn_end", message: { role: "assistant", con
 console.log(JSON.stringify({ type: "agent_end", messages: [] }));
 process.exit(0);
 `;
-  await fs.writeFile(commandPath, script, "utf8");
-  await fs.chmod(commandPath, 0o755);
+  return writePortableNodeCommand(commandPath, script);
 }
 
 describe("pi_local execute", () => {
   it("fails the run when Pi exhausts automatic retries despite exiting 0", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-pi-execute-"));
     const workspace = path.join(root, "workspace");
-    const commandPath = path.join(root, "pi");
     await fs.mkdir(workspace, { recursive: true });
-    await writeFakePiCommand(commandPath);
+    const commandPath = await writeFakePiCommand(path.join(root, "pi"));
 
     const previousHome = process.env.HOME;
     process.env.HOME = root;
@@ -96,14 +116,13 @@ describe("pi_local execute", () => {
   it("prepends installed skill bin/ dirs to the spawned Pi child PATH", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-pi-path-"));
     const workspace = path.join(root, "workspace");
-    const commandPath = path.join(root, "pi");
     const skillDir = path.join(root, "skills", "demo-skill");
     const skillBinDir = path.join(skillDir, "bin");
     const envDumpPath = path.join(root, "captured-path.txt");
     await fs.mkdir(workspace, { recursive: true });
     await fs.mkdir(skillBinDir, { recursive: true });
     await fs.writeFile(path.join(skillDir, "SKILL.md"), "# demo-skill\n", "utf8");
-    await writeEnvDumpPiCommand(commandPath, envDumpPath);
+    const commandPath = await writeEnvDumpPiCommand(path.join(root, "pi"), envDumpPath);
 
     const previousHome = process.env.HOME;
     process.env.HOME = root;
@@ -152,14 +171,13 @@ describe("pi_local execute", () => {
   it("does not expose bin/ dirs from skills that are not injected", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-pi-path-neg-"));
     const workspace = path.join(root, "workspace");
-    const commandPath = path.join(root, "pi");
     const nonInjectedSkillDir = path.join(root, "skills", "not-injected");
     const nonInjectedBinDir = path.join(nonInjectedSkillDir, "bin");
     const envDumpPath = path.join(root, "captured-path.txt");
     await fs.mkdir(workspace, { recursive: true });
     await fs.mkdir(nonInjectedBinDir, { recursive: true });
     await fs.writeFile(path.join(nonInjectedSkillDir, "SKILL.md"), "# not-injected\n", "utf8");
-    await writeEnvDumpPiCommand(commandPath, envDumpPath);
+    const commandPath = await writeEnvDumpPiCommand(path.join(root, "pi"), envDumpPath);
 
     const previousHome = process.env.HOME;
     process.env.HOME = root;

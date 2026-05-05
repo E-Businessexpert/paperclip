@@ -17,6 +17,7 @@ import {
 } from "@paperclipai/adapter-utils/execution-target";
 import path from "node:path";
 import os from "node:os";
+import fs from "node:fs/promises";
 import { parseCodexJsonl } from "./parse.js";
 import { codexHomeDir, readCodexAuthInfo } from "./quota.js";
 import { buildCodexExecArgs } from "./codex-args.js";
@@ -188,38 +189,57 @@ export async function testEnvironment(
       let probeCommand = command;
       let probeArgs = args;
       const probeEnv: Record<string, string> = { ...env };
+      let localProbeHomeToRemove: string | null = null;
       if (probeApiKey) {
         const probeHome = targetIsRemote
           ? `/tmp/paperclip-codex-probe-${runId}`
           : path.join(os.tmpdir(), `paperclip-codex-probe-${runId}`);
         probeEnv.CODEX_HOME = probeHome;
-        probeEnv._PAPERCLIP_CODEX_AUTH_JSON = JSON.stringify({ OPENAI_API_KEY: probeApiKey });
-        probeCommand = "sh";
-        // Trap on EXIT removes the probe home (with the API-key auth.json) on
-        // any exit path; we drop `exec` so the wrapper shell stays alive long
-        // enough for the trap to fire after the child returns.
-        probeArgs = [
-          "-c",
-          'set -e; mkdir -p "$CODEX_HOME"; umask 077; printf "%s" "$_PAPERCLIP_CODEX_AUTH_JSON" > "$CODEX_HOME/auth.json"; unset _PAPERCLIP_CODEX_AUTH_JSON; trap \'rm -rf "$CODEX_HOME"\' EXIT INT TERM; "$0" "$@"',
-          command,
-          ...args,
-        ];
+        if (process.platform === "win32" && !targetIsRemote) {
+          await fs.mkdir(probeHome, { recursive: true });
+          await fs.writeFile(path.join(probeHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: probeApiKey }));
+          localProbeHomeToRemove = probeHome;
+        } else {
+          probeEnv._PAPERCLIP_CODEX_AUTH_JSON = JSON.stringify({ OPENAI_API_KEY: probeApiKey });
+          probeCommand = "sh";
+          // Trap on EXIT removes the probe home (with the API-key auth.json) on
+          // any exit path; we drop `exec` so the wrapper shell stays alive long
+          // enough for the trap to fire after the child returns.
+          probeArgs = [
+            "-c",
+            'set -e; mkdir -p "$CODEX_HOME"; umask 077; printf "%s" "$_PAPERCLIP_CODEX_AUTH_JSON" > "$CODEX_HOME/auth.json"; unset _PAPERCLIP_CODEX_AUTH_JSON; trap \'rm -rf "$CODEX_HOME"\' EXIT INT TERM; "$0" "$@"',
+            command,
+            ...args,
+          ];
+        }
       }
 
-      const probe = await runAdapterExecutionTargetProcess(
-        runId,
-        target,
-        probeCommand,
-        probeArgs,
-        {
-          cwd,
-          env: probeEnv,
-          timeoutSec: 45,
-          graceSec: 5,
-          stdin: "Respond with hello.",
-          onLog: async () => {},
-        },
-      );
+      let probe;
+      try {
+        probe = await runAdapterExecutionTargetProcess(
+          runId,
+          target,
+          probeCommand,
+          probeArgs,
+          {
+            cwd,
+            env: probeEnv,
+            timeoutSec: 45,
+            graceSec: 5,
+            stdin: "Respond with hello.",
+            onLog: async () => {},
+          },
+        );
+      } finally {
+        if (localProbeHomeToRemove) {
+          await fs.rm(localProbeHomeToRemove, {
+            recursive: true,
+            force: true,
+            maxRetries: process.platform === "win32" ? 5 : 0,
+            retryDelay: 100,
+          }).catch(() => {});
+        }
+      }
       const parsed = parseCodexJsonl(probe.stdout);
       const detail = summarizeProbeDetail(probe.stdout, probe.stderr, parsed.errorMessage);
       const authEvidence = `${parsed.errorMessage ?? ""}\n${probe.stdout}\n${probe.stderr}`.trim();

@@ -5,6 +5,8 @@ import path from "node:path";
 import { runChildProcess } from "@paperclipai/adapter-utils/server-utils";
 import { execute } from "@paperclipai/adapter-claude-local/server";
 
+const itPosixSandbox = process.platform === "win32" ? it.skip : it;
+
 async function writeFailingClaudeCommand(
   commandPath: string,
   options: { resultEvent: Record<string, unknown>; exitCode?: number },
@@ -574,7 +576,7 @@ describe("claude execute", () => {
     }
   });
 
-  it("injects bridge env into sandbox-managed remote runs", async () => {
+  itPosixSandbox("injects bridge env into sandbox-managed remote runs", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-claude-execute-sandbox-"));
     const localWorkspace = path.join(root, "workspace");
     const remoteWorkspace = path.join(root, "sandbox-$HOME");

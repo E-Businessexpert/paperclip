@@ -1,10 +1,40 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 
-const {
-  resolveDynamicForbiddenTokens,
-  resolveForbiddenTokens,
-  runForbiddenTokenCheck,
-} = await import("../../../scripts/check-forbidden-tokens.mjs");
+type ForbiddenTokenModule = {
+  resolveDynamicForbiddenTokens: (
+    env: Record<string, string | undefined>,
+    options: { userInfo: () => { username?: string } },
+  ) => string[];
+  resolveForbiddenTokens: (
+    tokensFile: string | null,
+    env: Record<string, string | undefined>,
+    options: { userInfo: () => { username?: string } },
+  ) => string[];
+  runForbiddenTokenCheck: (options: {
+    repoRoot: string;
+    tokens: string[];
+    exec: (command: string) => string;
+    log: (message: string) => void;
+    error: (message: string) => void;
+  }) => number;
+};
+
+let resolveDynamicForbiddenTokens: ForbiddenTokenModule["resolveDynamicForbiddenTokens"];
+let resolveForbiddenTokens: ForbiddenTokenModule["resolveForbiddenTokens"];
+let runForbiddenTokenCheck: ForbiddenTokenModule["runForbiddenTokenCheck"];
+
+beforeAll(async () => {
+  const importModule = new Function("specifier", "return import(specifier)") as (
+    specifier: string,
+  ) => Promise<ForbiddenTokenModule>;
+  const moduleUrl = pathToFileURL(path.resolve(process.cwd(), "scripts/check-forbidden-tokens.mjs")).href;
+  const mod = await importModule(moduleUrl);
+  resolveDynamicForbiddenTokens = mod.resolveDynamicForbiddenTokens;
+  resolveForbiddenTokens = mod.resolveForbiddenTokens;
+  runForbiddenTokenCheck = mod.runForbiddenTokenCheck;
+});
 
 describe("forbidden token check", () => {
   it("derives username tokens without relying on whoami", () => {

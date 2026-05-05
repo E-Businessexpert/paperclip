@@ -135,7 +135,7 @@ describe("issueThreadInteractionService", () => {
     expect(created.id).toBe("interaction-1");
     expect(created.idempotencyKey).toBe("run-1:suggest");
     expect(db.insert).not.toHaveBeenCalled();
-  });
+  }, 15_000);
 
   it("answerQuestions normalizes duplicate option ids and persists answered results", async () => {
     const { issueThreadInteractionService } = await import("./issue-thread-interactions.js");

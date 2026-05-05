@@ -5,6 +5,8 @@ import path from "node:path";
 import { runChildProcess } from "@paperclipai/adapter-utils/server-utils";
 import { execute } from "@paperclipai/adapter-cursor-local/server";
 
+const itPosixSandbox = process.platform === "win32" ? it.skip : it;
+
 async function writeFakeCursorCommand(commandPath: string): Promise<void> {
   const script = `#!/usr/bin/env node
 const fs = require("node:fs");
@@ -126,7 +128,9 @@ describe("cursor execute", () => {
     await writeFakeCursorCommand(commandPath);
 
     const previousHome = process.env.HOME;
+    const previousUserProfile = process.env.USERPROFILE;
     process.env.HOME = root;
+    process.env.USERPROFILE = root;
 
     let invocationPrompt = "";
     try {
@@ -188,6 +192,11 @@ describe("cursor execute", () => {
       } else {
         process.env.HOME = previousHome;
       }
+      if (previousUserProfile === undefined) {
+        delete process.env.USERPROFILE;
+      } else {
+        process.env.USERPROFILE = previousUserProfile;
+      }
       await fs.rm(root, { recursive: true, force: true });
     }
   });
@@ -201,7 +210,9 @@ describe("cursor execute", () => {
     await writeFakeCursorCommand(commandPath);
 
     const previousHome = process.env.HOME;
+    const previousUserProfile = process.env.USERPROFILE;
     process.env.HOME = root;
+    process.env.USERPROFILE = root;
 
     try {
       const result = await execute({
@@ -262,7 +273,9 @@ describe("cursor execute", () => {
     const asciiHeartDir = await createSkillDir(runtimeSkillsRoot, "ascii-heart");
 
     const previousHome = process.env.HOME;
+    const previousUserProfile = process.env.USERPROFILE;
     process.env.HOME = root;
+    process.env.USERPROFILE = root;
 
     try {
       const result = await execute({
@@ -319,11 +332,16 @@ describe("cursor execute", () => {
       } else {
         process.env.HOME = previousHome;
       }
+      if (previousUserProfile === undefined) {
+        delete process.env.USERPROFILE;
+      } else {
+        process.env.USERPROFILE = previousUserProfile;
+      }
       await fs.rm(root, { recursive: true, force: true });
     }
   });
 
-  it("prefers ~/.local/bin/cursor-agent for remote sandbox execution when using the default command", async () => {
+  itPosixSandbox("prefers ~/.local/bin/cursor-agent for remote sandbox execution when using the default command", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-cursor-sandbox-execute-"));
     const homeDir = path.join(root, "home");
     const workspace = path.join(root, "workspace");
@@ -387,7 +405,7 @@ describe("cursor execute", () => {
     }
   });
 
-  it("keeps explicit command overrides for remote sandbox execution", async () => {
+  itPosixSandbox("keeps explicit command overrides for remote sandbox execution", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-cursor-sandbox-explicit-"));
     const homeDir = path.join(root, "home");
     const workspace = path.join(root, "workspace");

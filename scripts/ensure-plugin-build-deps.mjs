@@ -16,11 +16,13 @@ const buildTargets = [
   {
     name: "@paperclipai/shared",
     output: path.join(rootDir, "packages/shared/dist/index.js"),
+    sourceDir: path.join(rootDir, "packages/shared/src"),
     tsconfig: path.join(rootDir, "packages/shared/tsconfig.json"),
   },
   {
     name: "@paperclipai/plugin-sdk",
     output: path.join(rootDir, "packages/plugins/sdk/dist/index.js"),
+    sourceDir: path.join(rootDir, "packages/plugins/sdk/src"),
     tsconfig: path.join(rootDir, "packages/plugins/sdk/tsconfig.json"),
   },
 ];
@@ -29,8 +31,38 @@ if (!fs.existsSync(tscCliPath)) {
   throw new Error(`TypeScript CLI not found at ${tscCliPath}`);
 }
 
+function newestMtimeMs(targetPath) {
+  if (!fs.existsSync(targetPath)) {
+    return 0;
+  }
+
+  const stat = fs.statSync(targetPath);
+  if (!stat.isDirectory()) {
+    return stat.mtimeMs;
+  }
+
+  let newest = stat.mtimeMs;
+  for (const entry of fs.readdirSync(targetPath)) {
+    newest = Math.max(newest, newestMtimeMs(path.join(targetPath, entry)));
+  }
+  return newest;
+}
+
+function targetIsFresh(target) {
+  if (!fs.existsSync(target.output)) {
+    return false;
+  }
+
+  const outputMtimeMs = fs.statSync(target.output).mtimeMs;
+  const sourceMtimeMs = Math.max(
+    newestMtimeMs(target.sourceDir),
+    newestMtimeMs(target.tsconfig),
+  );
+  return outputMtimeMs >= sourceMtimeMs;
+}
+
 function allOutputsExist() {
-  return buildTargets.every((target) => fs.existsSync(target.output));
+  return buildTargets.every(targetIsFresh);
 }
 
 function sleep(ms) {
@@ -76,7 +108,7 @@ try {
   }
 
   for (const target of buildTargets) {
-    if (fs.existsSync(target.output)) {
+    if (targetIsFresh(target)) {
       continue;
     }
 

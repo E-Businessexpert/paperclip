@@ -12,6 +12,7 @@ import {
 } from "./sandbox-managed-runtime.js";
 
 const execFile = promisify(execFileCallback);
+const itWithPosixShell = process.platform === "win32" ? it.skip : it;
 
 describe("sandbox managed runtime", () => {
   const cleanupDirs: string[] = [];
@@ -49,7 +50,7 @@ describe("sandbox managed runtime", () => {
     await expect(readFile(path.join(targetDir, "stale.txt"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("syncs workspace and assets through a provider-neutral sandbox client", async () => {
+  itWithPosixShell("syncs workspace and assets through a provider-neutral sandbox client", async () => {
     const rootDir = await mkdtemp(path.join(os.tmpdir(), "paperclip-sandbox-managed-"));
     cleanupDirs.push(rootDir);
     const localWorkspaceDir = path.join(rootDir, "local-workspace");

@@ -725,17 +725,32 @@ export function rebindWorkspaceCwd(input: {
   targetRepoRoot: string;
   workspaceCwd: string;
 }): string | null {
-  const sourceRepoRoot = path.resolve(input.sourceRepoRoot);
-  const targetRepoRoot = path.resolve(input.targetRepoRoot);
-  const workspaceCwd = path.resolve(input.workspaceCwd);
-  const relative = path.relative(sourceRepoRoot, workspaceCwd);
+  const pathApi = selectPathApiForRebind(
+    input.sourceRepoRoot,
+    input.targetRepoRoot,
+    input.workspaceCwd,
+  );
+  const sourceRepoRoot = pathApi.resolve(input.sourceRepoRoot);
+  const targetRepoRoot = pathApi.resolve(input.targetRepoRoot);
+  const workspaceCwd = pathApi.resolve(input.workspaceCwd);
+  const relative = pathApi.relative(sourceRepoRoot, workspaceCwd);
   if (!relative || relative === "") {
     return targetRepoRoot;
   }
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+  if (relative.startsWith("..") || pathApi.isAbsolute(relative)) {
     return null;
   }
-  return path.resolve(targetRepoRoot, relative);
+  return pathApi.resolve(targetRepoRoot, relative);
+}
+
+function selectPathApiForRebind(...values: string[]): typeof path.posix {
+  if (values.every((value) => value.startsWith("/") && !/^[A-Za-z]:[\\/]/.test(value))) {
+    return path.posix;
+  }
+  if (values.some((value) => /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\"))) {
+    return path.win32;
+  }
+  return path;
 }
 
 async function rebindSeededProjectWorkspaces(input: {
@@ -1562,6 +1577,11 @@ export async function worktreeMakeCommand(nameArg: string, opts: WorktreeMakeOpt
 }
 
 function installDependenciesBestEffort(targetPath: string): void {
+  if (!existsSync(path.resolve(targetPath, "package.json"))) {
+    p.log.message(pc.dim("No package.json found in the worktree; skipping dependency install."));
+    return;
+  }
+
   const installSpinner = p.spinner();
   installSpinner.start("Installing dependencies...");
   try {

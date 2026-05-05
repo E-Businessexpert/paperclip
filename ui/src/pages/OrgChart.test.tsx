@@ -124,6 +124,21 @@ async function flushReact() {
   });
 }
 
+function parseLayerTransform(transform: string) {
+  const match = transform.match(
+    /^translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([-\d.]+)\)$/,
+  );
+  if (!match) {
+    throw new Error(`Unexpected transform: ${transform}`);
+  }
+
+  return {
+    x: Number(match[1]),
+    y: Number(match[2]),
+    scale: Number(match[3]),
+  };
+}
+
 describe("OrgChart mobile gestures", () => {
   let container: HTMLDivElement;
   let root: ReturnType<typeof createRoot>;
@@ -209,6 +224,7 @@ describe("OrgChart mobile gestures", () => {
 
   it("pans the chart with one-finger touch drag", async () => {
     const { viewport, layer } = await renderOrgChart();
+    const initialTransform = parseLayerTransform(layer.style.transform);
 
     await act(async () => {
       viewport.dispatchEvent(createTouchEvent("touchstart", [{ clientX: 100, clientY: 100 }]));
@@ -216,7 +232,10 @@ describe("OrgChart mobile gestures", () => {
       viewport.dispatchEvent(createTouchEvent("touchend", []));
     });
 
-    expect(layer.style.transform).toBe("translate(50px, 105px) scale(1)");
+    const nextTransform = parseLayerTransform(layer.style.transform);
+    expect(nextTransform.x).toBeCloseTo(initialTransform.x + 30);
+    expect(nextTransform.y).toBeCloseTo(initialTransform.y + 45);
+    expect(nextTransform.scale).toBeCloseTo(initialTransform.scale);
   });
 
   it("suppresses card navigation after a touch pan", async () => {
@@ -247,6 +266,7 @@ describe("OrgChart mobile gestures", () => {
   });
   it("pinch-zooms toward the touch center", async () => {
     const { viewport, layer } = await renderOrgChart();
+    const initialTransform = parseLayerTransform(layer.style.transform);
 
     await act(async () => {
       viewport.dispatchEvent(createTouchEvent("touchstart", [
@@ -260,6 +280,10 @@ describe("OrgChart mobile gestures", () => {
       viewport.dispatchEvent(createTouchEvent("touchend", []));
     });
 
-    expect(layer.style.transform).toBe("translate(-45px, 40px) scale(1.5)");
+    const nextTransform = parseLayerTransform(layer.style.transform);
+    const scaleRatio = 1.5;
+    expect(nextTransform.scale).toBeCloseTo(initialTransform.scale * scaleRatio);
+    expect(nextTransform.x).toBeCloseTo(150 - scaleRatio * (150 - initialTransform.x));
+    expect(nextTransform.y).toBeCloseTo(100 - scaleRatio * (100 - initialTransform.y));
   });
 });

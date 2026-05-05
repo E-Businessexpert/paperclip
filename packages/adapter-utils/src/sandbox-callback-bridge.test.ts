@@ -17,6 +17,7 @@ import {
 import type { RunProcessResult } from "./server-utils.js";
 
 const execFile = promisify(execFileCallback);
+const itWithPosixShell = process.platform === "win32" ? it.skip : it;
 
 describe("sandbox callback bridge", () => {
   const cleanupDirs: string[] = [];
@@ -111,7 +112,7 @@ describe("sandbox callback bridge", () => {
     }
   });
 
-  it("round-trips localhost bridge requests over the sandbox queue without forwarding the bridge token", async () => {
+  itWithPosixShell("round-trips localhost bridge requests over the sandbox queue without forwarding the bridge token", async () => {
     const rootDir = await mkdtemp(path.join(os.tmpdir(), "paperclip-bridge-runtime-"));
     cleanupDirs.push(rootDir);
 
@@ -419,7 +420,7 @@ describe("sandbox callback bridge", () => {
     );
   });
 
-  it("rejects non-JSON request bodies and full queues at the bridge server", async () => {
+  itWithPosixShell("rejects non-JSON request bodies and full queues at the bridge server", async () => {
     const rootDir = await mkdtemp(path.join(os.tmpdir(), "paperclip-bridge-server-guards-"));
     cleanupDirs.push(rootDir);
 
@@ -501,7 +502,7 @@ describe("sandbox callback bridge", () => {
     });
   });
 
-  it("returns a 502 when the host response times out", async () => {
+  itWithPosixShell("returns a 502 when the host response times out", async () => {
     const rootDir = await mkdtemp(path.join(os.tmpdir(), "paperclip-bridge-timeout-"));
     cleanupDirs.push(rootDir);
 
@@ -553,7 +554,7 @@ describe("sandbox callback bridge", () => {
     });
   });
 
-  it("returns a 502 for malformed host response files", async () => {
+  itWithPosixShell("returns a 502 for malformed host response files", async () => {
     const rootDir = await mkdtemp(path.join(os.tmpdir(), "paperclip-bridge-malformed-response-"));
     cleanupDirs.push(rootDir);
 

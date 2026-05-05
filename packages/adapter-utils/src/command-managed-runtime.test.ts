@@ -9,8 +9,9 @@ import { prepareCommandManagedRuntime } from "./command-managed-runtime.js";
 import type { RunProcessResult } from "./server-utils.js";
 
 const execFile = promisify(execFileCallback);
+const describeWithPosixShell = process.platform === "win32" ? describe.skip : describe;
 
-describe("command managed runtime", () => {
+describeWithPosixShell("command managed runtime", () => {
   const cleanupDirs: string[] = [];
 
   afterEach(async () => {

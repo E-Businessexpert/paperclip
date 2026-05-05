@@ -5,6 +5,8 @@ import path from "node:path";
 import { runChildProcess } from "@paperclipai/adapter-utils/server-utils";
 import { testEnvironment } from "@paperclipai/adapter-cursor-local/server";
 
+const itPosixSandbox = process.platform === "win32" ? it.skip : it;
+
 async function writeFakeAgentCommand(binDir: string, argsCapturePath: string): Promise<string> {
   const commandPath = path.join(binDir, "agent");
   const script = `#!/usr/bin/env node
@@ -180,7 +182,7 @@ describe("cursor environment diagnostics", () => {
     await fs.rm(root, { recursive: true, force: true });
   });
 
-  it("prefers ~/.local/bin/cursor-agent for remote sandbox probes when using the default command", async () => {
+  itPosixSandbox("prefers ~/.local/bin/cursor-agent for remote sandbox probes when using the default command", async () => {
     const root = path.join(
       os.tmpdir(),
       `paperclip-cursor-sandbox-probe-${Date.now()}-${Math.random().toString(16).slice(2)}`,

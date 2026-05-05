@@ -34,6 +34,7 @@ export type EmbeddedPostgresTestDatabase = {
 let embeddedPostgresSupportPromise: Promise<EmbeddedPostgresTestSupport> | null = null;
 
 const DEFAULT_PAPERCLIP_EMBEDDED_POSTGRES_PORT = 54329;
+const EMBEDDED_POSTGRES_TEST_START_TIMEOUT_MS = 15_000;
 
 function getReservedTestPorts(): Set<number> {
   const configuredPorts = [
@@ -49,6 +50,26 @@ function getReservedTestPorts(): Set<number> {
 async function getEmbeddedPostgresCtor(): Promise<EmbeddedPostgresCtor> {
   const mod = await import("embedded-postgres");
   return mod.default as EmbeddedPostgresCtor;
+}
+
+async function withTimeout<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+  description: string,
+): Promise<T> {
+  let timeout: NodeJS.Timeout | null = null;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(() => {
+          reject(new Error(`${description} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 async function getAvailablePort(): Promise<number> {
@@ -100,8 +121,13 @@ async function createEmbeddedPostgresTestInstance(tempDirPrefix: string) {
   return { dataDir, port, instance };
 }
 
-function cleanupEmbeddedPostgresTestDirs(dataDir: string) {
-  fs.rmSync(dataDir, { recursive: true, force: true });
+async function cleanupEmbeddedPostgresTestDirs(dataDir: string) {
+  await fs.promises.rm(dataDir, {
+    recursive: true,
+    force: true,
+    maxRetries: process.platform === "win32" ? 10 : 0,
+    retryDelay: 150,
+  });
 }
 
 function formatEmbeddedPostgresError(error: unknown): string {
@@ -111,13 +137,28 @@ function formatEmbeddedPostgresError(error: unknown): string {
 }
 
 async function probeEmbeddedPostgresSupport(): Promise<EmbeddedPostgresTestSupport> {
+  if (process.platform === "win32" && process.env.PAPERCLIP_TEST_EMBEDDED_POSTGRES_ON_WINDOWS !== "1") {
+    return {
+      supported: false,
+      reason: "embedded Postgres tests are disabled on Windows unless PAPERCLIP_TEST_EMBEDDED_POSTGRES_ON_WINDOWS=1",
+    };
+  }
+
   const { dataDir, instance } = await createEmbeddedPostgresTestInstance(
     "paperclip-embedded-postgres-probe-",
   );
 
   try {
-    await instance.initialise();
-    await instance.start();
+    await withTimeout(
+      instance.initialise(),
+      EMBEDDED_POSTGRES_TEST_START_TIMEOUT_MS,
+      "embedded Postgres initialise probe",
+    );
+    await withTimeout(
+      instance.start(),
+      EMBEDDED_POSTGRES_TEST_START_TIMEOUT_MS,
+      "embedded Postgres start probe",
+    );
     return { supported: true };
   } catch (error) {
     return {
@@ -126,7 +167,7 @@ async function probeEmbeddedPostgresSupport(): Promise<EmbeddedPostgresTestSuppo
     };
   } finally {
     await instance.stop().catch(() => {});
-    cleanupEmbeddedPostgresTestDirs(dataDir);
+    await cleanupEmbeddedPostgresTestDirs(dataDir);
   }
 }
 
@@ -143,8 +184,16 @@ export async function startEmbeddedPostgresTestDatabase(
   const { dataDir, port, instance } = await createEmbeddedPostgresTestInstance(tempDirPrefix);
 
   try {
-    await instance.initialise();
-    await instance.start();
+    await withTimeout(
+      instance.initialise(),
+      EMBEDDED_POSTGRES_TEST_START_TIMEOUT_MS,
+      "embedded Postgres test database initialise",
+    );
+    await withTimeout(
+      instance.start(),
+      EMBEDDED_POSTGRES_TEST_START_TIMEOUT_MS,
+      "embedded Postgres test database start",
+    );
 
     const adminConnectionString = `postgres://paperclip:paperclip@127.0.0.1:${port}/postgres`;
     await ensurePostgresDatabase(adminConnectionString, "paperclip");
@@ -155,12 +204,12 @@ export async function startEmbeddedPostgresTestDatabase(
       connectionString,
       cleanup: async () => {
         await instance.stop().catch(() => {});
-        cleanupEmbeddedPostgresTestDirs(dataDir);
+        await cleanupEmbeddedPostgresTestDirs(dataDir);
       },
     };
   } catch (error) {
     await instance.stop().catch(() => {});
-    cleanupEmbeddedPostgresTestDirs(dataDir);
+    await cleanupEmbeddedPostgresTestDirs(dataDir);
     throw new Error(
       `Failed to start embedded PostgreSQL test database: ${formatEmbeddedPostgresError(error)}`,
     );

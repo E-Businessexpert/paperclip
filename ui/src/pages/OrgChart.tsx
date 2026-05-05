@@ -95,6 +95,7 @@ const COMPANY_ACCENTS = [
 ];
 const GRAPH_MIN_ZOOM = 0.2;
 const GRAPH_MAX_ZOOM = 2.4;
+const TOUCH_MOVE_THRESHOLD = 6;
 const ALL_COMPANIES_FILTER = "__all_companies__";
 
 type OrgViewMode = "hierarchy" | "enterprise";
@@ -125,6 +126,21 @@ interface OrgChartProps {
   title?: string;
   subtitle?: string;
   enterpriseScope?: EnterpriseGraphScopeMode;
+}
+
+interface Point {
+  x: number;
+  y: number;
+}
+
+interface TouchGesture {
+  mode: "pan" | "pinch" | null;
+  startPoint: Point;
+  startPan: Point;
+  startZoom: number;
+  startDistance: number;
+  startCenter: Point;
+  moved: boolean;
 }
 
 interface LayoutNode {
@@ -993,6 +1009,26 @@ function collectEdges(nodes: LayoutNode[]): HierarchyEdge[] {
   return edges;
 }
 
+function clampGraphZoom(value: number): number {
+  return Math.min(Math.max(value, GRAPH_MIN_ZOOM), GRAPH_MAX_ZOOM);
+}
+
+function touchPoint(touch: React.Touch): Point {
+  return { x: touch.clientX, y: touch.clientY };
+}
+
+function touchDistance(a: React.Touch, b: React.Touch): number {
+  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+}
+
+function touchCenter(a: React.Touch, b: React.Touch, container: HTMLDivElement): Point {
+  const rect = container.getBoundingClientRect();
+  return {
+    x: (a.clientX + b.clientX) / 2 - rect.left,
+    y: (a.clientY + b.clientY) / 2 - rect.top,
+  };
+}
+
 function relationshipCurvePath(source: LayoutNode, target: LayoutNode, index: number) {
   const x1 = source.x + CARD_W / 2;
   const y1 = source.y + CARD_H / 2;
@@ -1389,12 +1425,26 @@ export function OrgChart({
   subtitle,
   enterpriseScope = "company",
 }: OrgChartProps = {}) {
-  const { companies, selectedCompanyId, selectedCompany } = useCompany();
+  const { companies: contextCompanies, selectedCompanyId, selectedCompany } = useCompany();
+  const companies = Array.isArray(contextCompanies) ? contextCompanies : [];
   const { setBreadcrumbs } = useBreadcrumbs();
   const navigate = useNavigate();
   const containerRef = useRef<HTMLDivElement>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const dragStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
+  const touchGesture = useRef<TouchGesture>({
+    mode: null,
+    startPoint: { x: 0, y: 0 },
+    startPan: { x: 0, y: 0 },
+    startZoom: 1,
+    startDistance: 0,
+    startCenter: { x: 0, y: 0 },
+    moved: false,
+  });
+  const suppressNextCardClick = useRef(false);
+  const touchTapNavigatesNextCardClick = useRef(false);
+  const suppressClickTimerRef = useRef<number | null>(null);
+  const touchTapTimerRef = useRef<number | null>(null);
   const hasInitialized = useRef(false);
   const hasInitializedCollapseState = useRef(false);
   const pendingCollapseViewportAlignmentKey = useRef<string | null>(null);
@@ -1495,6 +1545,17 @@ export function OrgChart({
   useEffect(() => {
     setBreadcrumbs([{ label: pageTitle }]);
   }, [pageTitle, setBreadcrumbs]);
+
+  useEffect(() => {
+    return () => {
+      if (suppressClickTimerRef.current !== null) {
+        window.clearTimeout(suppressClickTimerRef.current);
+      }
+      if (touchTapTimerRef.current !== null) {
+        window.clearTimeout(touchTapTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     hasInitialized.current = false;
@@ -2877,6 +2938,36 @@ export function OrgChart({
     setSelectedInspectorItem(null);
   }, [effectiveViewMode]);
 
+  const clearTouchTapNavigation = useCallback(() => {
+    touchTapNavigatesNextCardClick.current = false;
+    if (touchTapTimerRef.current !== null) {
+      window.clearTimeout(touchTapTimerRef.current);
+      touchTapTimerRef.current = null;
+    }
+  }, []);
+
+  const armTouchTapNavigation = useCallback(() => {
+    clearTouchTapNavigation();
+    touchTapNavigatesNextCardClick.current = true;
+    touchTapTimerRef.current = window.setTimeout(() => {
+      touchTapNavigatesNextCardClick.current = false;
+      touchTapTimerRef.current = null;
+    }, 400);
+  }, [clearTouchTapNavigation]);
+
+  const handleCardClick = useCallback(
+    (node: LayoutNode, agent?: AgentDirectoryEntry) => {
+      if (touchTapNavigatesNextCardClick.current) {
+        clearTouchTapNavigation();
+        navigate(agent ? agentUrl(agent) : `/agents/${node.id}`);
+        return;
+      }
+
+      handleFocusAgent(node.id);
+    },
+    [clearTouchTapNavigation, handleFocusAgent, navigate],
+  );
+
   const handleMouseDown = useCallback(
     (event: React.MouseEvent) => {
       if (event.button !== 0) return;
@@ -2909,6 +3000,125 @@ export function OrgChart({
   const handleMouseUp = useCallback(() => {
     setDragging(false);
   }, []);
+
+  const handleTouchStart = useCallback(
+    (event: React.TouchEvent<HTMLDivElement>) => {
+      clearTouchTapNavigation();
+
+      if (event.touches.length >= 2 && containerRef.current) {
+        const [first, second] = [event.touches[0]!, event.touches[1]!];
+        touchGesture.current = {
+          mode: "pinch",
+          startPoint: { x: 0, y: 0 },
+          startPan: pan,
+          startZoom: zoom,
+          startDistance: touchDistance(first, second),
+          startCenter: touchCenter(first, second, containerRef.current),
+          moved: false,
+        };
+        return;
+      }
+
+      const touch = event.touches[0];
+      if (!touch) return;
+      touchGesture.current = {
+        mode: "pan",
+        startPoint: touchPoint(touch),
+        startPan: pan,
+        startZoom: zoom,
+        startDistance: 0,
+        startCenter: { x: 0, y: 0 },
+        moved: false,
+      };
+    },
+    [clearTouchTapNavigation, pan, zoom],
+  );
+
+  const handleTouchMove = useCallback(
+    (event: React.TouchEvent<HTMLDivElement>) => {
+      const container = containerRef.current;
+      if (!container || !touchGesture.current.mode) return;
+
+      event.preventDefault();
+
+      if (event.touches.length >= 2) {
+        const [first, second] = [event.touches[0]!, event.touches[1]!];
+        const distance = touchDistance(first, second);
+        const center = touchCenter(first, second, container);
+
+        if (touchGesture.current.mode !== "pinch" || touchGesture.current.startDistance === 0) {
+          touchGesture.current = {
+            mode: "pinch",
+            startPoint: { x: 0, y: 0 },
+            startPan: pan,
+            startZoom: zoom,
+            startDistance: distance,
+            startCenter: center,
+            moved: false,
+          };
+          return;
+        }
+
+        const gesture = touchGesture.current;
+        const nextZoom = clampGraphZoom(gesture.startZoom * (distance / gesture.startDistance));
+        const scale = nextZoom / gesture.startZoom;
+        const dx = center.x - gesture.startCenter.x;
+        const dy = center.y - gesture.startCenter.y;
+        gesture.moved =
+          gesture.moved ||
+          Math.abs(distance - gesture.startDistance) > TOUCH_MOVE_THRESHOLD ||
+          Math.hypot(dx, dy) > TOUCH_MOVE_THRESHOLD;
+
+        setZoom(nextZoom);
+        setPan({
+          x: center.x - scale * (gesture.startCenter.x - gesture.startPan.x),
+          y: center.y - scale * (gesture.startCenter.y - gesture.startPan.y),
+        });
+        return;
+      }
+
+      const touch = event.touches[0];
+      if (!touch || touchGesture.current.mode !== "pan") return;
+
+      const dx = touch.clientX - touchGesture.current.startPoint.x;
+      const dy = touch.clientY - touchGesture.current.startPoint.y;
+      touchGesture.current.moved =
+        touchGesture.current.moved || Math.hypot(dx, dy) > TOUCH_MOVE_THRESHOLD;
+
+      setPan({
+        x: touchGesture.current.startPan.x + dx,
+        y: touchGesture.current.startPan.y + dy,
+      });
+    },
+    [pan, zoom],
+  );
+
+  const handleTouchEnd = useCallback(() => {
+    const gesture = touchGesture.current;
+
+    if (gesture.moved) {
+      suppressNextCardClick.current = true;
+      if (suppressClickTimerRef.current !== null) {
+        window.clearTimeout(suppressClickTimerRef.current);
+      }
+      suppressClickTimerRef.current = window.setTimeout(() => {
+        suppressNextCardClick.current = false;
+        suppressClickTimerRef.current = null;
+      }, 400);
+    } else if (gesture.mode === "pan") {
+      armTouchTapNavigation();
+    }
+
+    touchGesture.current = {
+      mode: null,
+      startPoint: { x: 0, y: 0 },
+      startPan: pan,
+      startZoom: zoom,
+      startDistance: 0,
+      startCenter: { x: 0, y: 0 },
+      moved: false,
+    };
+  }, [armTouchTapNavigation, pan, zoom]);
 
   const handleWheel = useCallback(
     (event: WheelEvent) => {
@@ -4295,19 +4505,24 @@ export function OrgChart({
         >
           <div
             ref={containerRef}
+            data-testid="org-chart-viewport"
             data-full-structure-graph
             className={cn(
               "relative min-w-0 flex-1 overflow-hidden border border-border/70 bg-gradient-to-br from-slate-100/70 via-background to-slate-200/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] dark:border-white/10 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900/90",
               graphPanelHeightClass,
               fullscreen ? "rounded-3xl" : "rounded-2xl",
             )}
-            style={{ cursor: dragging ? "grabbing" : "grab" }}
+            style={{ cursor: dragging ? "grabbing" : "grab", touchAction: "none" }}
             data-graph-zoom={zoom.toFixed(4)}
             data-graph-shortcut={fullscreen && compactFilters ? "wheel-zoom" : "ctrl-wheel-zoom"}
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+            onTouchCancel={handleTouchEnd}
           >
           <div
             className="pointer-events-none absolute inset-0 opacity-90"
@@ -4627,6 +4842,7 @@ export function OrgChart({
           </svg>
 
           <div
+            data-testid="org-chart-card-layer"
             className="absolute inset-0"
             style={{
               transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
@@ -4697,7 +4913,14 @@ export function OrgChart({
                             ? "0 0 0 1.5px rgba(148,163,184,0.7), 0 18px 42px -28px rgba(15,23,42,0.6)"
                             : undefined,
                       }}
-                      onClick={() => handleFocusAgent(node.id)}
+                      onClick={() => handleCardClick(node, agent)}
+                      onClickCapture={(event) => {
+                        if (!suppressNextCardClick.current) return;
+                        suppressNextCardClick.current = false;
+                        clearTouchTapNavigation();
+                        event.preventDefault();
+                        event.stopPropagation();
+                      }}
                       onDoubleClick={() => navigate(agent ? agentUrl(agent) : `/agents/${node.id}`)}
                       title="Click to inspect wiring. Double-click to open the agent."
                     >

@@ -978,7 +978,8 @@ export function defaultPathForPlatform() {
 }
 
 function windowsPathExts(env: NodeJS.ProcessEnv): string[] {
-  return (env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";").filter(Boolean);
+  const configured = (env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";").filter(Boolean);
+  return configured.includes("") ? configured : [...configured, ""];
 }
 
 async function pathExists(candidate: string) {
@@ -1094,6 +1095,17 @@ function resolveWindowsCmdShell(env: NodeJS.ProcessEnv): string {
   return path.join(fallbackRoot, "System32", "cmd.exe");
 }
 
+async function resolveWindowsNodeShebangScript(command: string): Promise<string | null> {
+  if (process.platform !== "win32" || path.extname(command).length > 0) return null;
+  try {
+    const contents = await fs.readFile(command, "utf8");
+    const firstLine = contents.split(/\r?\n/, 1)[0]?.trim().toLowerCase() ?? "";
+    return firstLine.startsWith("#!") && /\bnode(?:\.exe)?\b/.test(firstLine) ? command : null;
+  } catch {
+    return null;
+  }
+}
+
 async function resolveSpawnTarget(
   command: string,
   args: string[],
@@ -1131,6 +1143,11 @@ async function resolveSpawnTarget(
 
   if (process.platform !== "win32") {
     return { command: executable, args };
+  }
+
+  const nodeScript = await resolveWindowsNodeShebangScript(executable);
+  if (nodeScript) {
+    return { command: process.execPath, args: [nodeScript, ...args] };
   }
 
   if (/\.(cmd|bat)$/i.test(executable)) {

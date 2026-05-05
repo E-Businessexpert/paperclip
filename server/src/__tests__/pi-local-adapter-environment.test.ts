@@ -4,8 +4,32 @@ import os from "node:os";
 import path from "node:path";
 import { testEnvironment } from "@paperclipai/adapter-pi-local/server";
 
-async function writeFakePiCommand(binDir: string, mode: "success" | "stale-package"): Promise<void> {
-  const commandPath = path.join(binDir, "pi");
+async function writePortablePathCommand(binDir: string, commandName: string, script: string): Promise<string> {
+  if (process.platform !== "win32") {
+    const commandPath = path.join(binDir, commandName);
+    await fs.writeFile(commandPath, script, "utf8");
+    await fs.chmod(commandPath, 0o755);
+    return commandName;
+  }
+
+  const scriptPath = path.join(binDir, `${commandName}.cjs`);
+  const shimName = `${commandName}.cmd`;
+  const shimPath = path.join(binDir, shimName);
+  await fs.writeFile(scriptPath, script, "utf8");
+  await fs.writeFile(
+    shimPath,
+    [
+      "@echo off",
+      `"${process.execPath}" "${scriptPath}" %*`,
+      "exit /b %ERRORLEVEL%",
+      "",
+    ].join("\r\n"),
+    "utf8",
+  );
+  return shimName;
+}
+
+async function writeFakePiCommand(binDir: string, mode: "success" | "stale-package"): Promise<string> {
   const script =
     mode === "success"
       ? `#!/usr/bin/env node
@@ -34,8 +58,7 @@ if (process.argv.includes("--list-models")) {
 }
 process.exit(1);
 `;
-  await fs.writeFile(commandPath, script, "utf8");
-  await fs.chmod(commandPath, 0o755);
+  return writePortablePathCommand(binDir, "pi", script);
 }
 
 describe("pi_local environment diagnostics", () => {
@@ -48,13 +71,13 @@ describe("pi_local environment diagnostics", () => {
     const cwd = path.join(root, "workspace");
     await fs.mkdir(binDir, { recursive: true });
     await fs.mkdir(cwd, { recursive: true });
-    await writeFakePiCommand(binDir, "success");
+    const command = await writeFakePiCommand(binDir, "success");
 
     const result = await testEnvironment({
       companyId: "company-1",
       adapterType: "pi_local",
       config: {
-        command: "pi",
+        command,
         cwd,
         model: "openai/gpt-4.1-mini",
         env: {
@@ -79,13 +102,13 @@ describe("pi_local environment diagnostics", () => {
     const cwd = path.join(root, "workspace");
     await fs.mkdir(binDir, { recursive: true });
     await fs.mkdir(cwd, { recursive: true });
-    await writeFakePiCommand(binDir, "stale-package");
+    const command = await writeFakePiCommand(binDir, "stale-package");
 
     const result = await testEnvironment({
       companyId: "company-1",
       adapterType: "pi_local",
       config: {
-        command: "pi",
+        command,
         cwd,
         env: {
           PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
