@@ -75,6 +75,7 @@ const COMPANY_TREE_GAP_X = 52;
 const COMPANY_TREE_GAP_Y = 108;
 const ORG_VIEW_MODE_STORAGE_KEY = "paperclip.orgChart.viewMode";
 const COLLAPSED_NODE_IDS_STORAGE_PREFIX = "paperclip.orgChart.collapsedNodeIds";
+const COMPANY_ORDER_STORAGE_PREFIX = "paperclip.orgChart.companyOrderIds";
 const CROSS_COMPANY_STROKE = "#ef4444";
 const DEFAULT_EDGE_STROKE = "rgba(148, 163, 184, 0.55)";
 const COMPANY_ACCENTS = [
@@ -97,6 +98,7 @@ const GRAPH_MIN_ZOOM = 0.2;
 const GRAPH_MAX_ZOOM = 2.4;
 const TOUCH_MOVE_THRESHOLD = 6;
 const ALL_COMPANIES_FILTER = "__all_companies__";
+const UNORDERED_COMPANY_INDEX = Number.MAX_SAFE_INTEGER;
 
 type OrgViewMode = "hierarchy" | "enterprise";
 type EnterpriseGraphScopeMode = "company" | "family";
@@ -803,6 +805,109 @@ function formatCompanyOptionLabel(option: CompanyOption) {
   return option.issuePrefix ? `${option.issuePrefix} · ${option.name}` : option.name;
 }
 
+function buildCompanyOrderStorageKey(
+  selectedCompanyId: string,
+  enterpriseScope: EnterpriseGraphScopeMode,
+) {
+  return `${COMPANY_ORDER_STORAGE_PREFIX}:${enterpriseScope}:${selectedCompanyId}`;
+}
+
+function reconcileCompanyOrderIds(
+  orderIds: readonly string[] | null | undefined,
+  options: readonly CompanyOption[],
+) {
+  const validIds = new Set(options.map((option) => option.id));
+  const nextOrderIds: string[] = [];
+
+  for (const companyId of orderIds ?? []) {
+    if (validIds.has(companyId) && !nextOrderIds.includes(companyId)) {
+      nextOrderIds.push(companyId);
+    }
+  }
+
+  for (const option of options) {
+    if (!nextOrderIds.includes(option.id)) {
+      nextOrderIds.push(option.id);
+    }
+  }
+
+  return nextOrderIds;
+}
+
+function readStoredCompanyOrderIds(
+  storageKey: string | null,
+  options: readonly CompanyOption[],
+) {
+  if (!storageKey || typeof window === "undefined") {
+    return reconcileCompanyOrderIds(null, options);
+  }
+
+  try {
+    const stored = window.localStorage.getItem(storageKey);
+    if (!stored) return reconcileCompanyOrderIds(null, options);
+
+    const parsed = JSON.parse(stored) as { orderIds?: unknown };
+    if (!Array.isArray(parsed.orderIds)) return reconcileCompanyOrderIds(null, options);
+
+    return reconcileCompanyOrderIds(
+      parsed.orderIds.filter((companyId): companyId is string => typeof companyId === "string"),
+      options,
+    );
+  } catch {
+    return reconcileCompanyOrderIds(null, options);
+  }
+}
+
+function persistCompanyOrderIds(storageKey: string | null, orderIds: readonly string[]) {
+  if (!storageKey || typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        version: 1,
+        orderIds,
+      }),
+    );
+  } catch {
+    // Ignore storage failures in restricted environments.
+  }
+}
+
+function moveCompanyOrderId(
+  orderIds: readonly string[],
+  companyId: string,
+  direction: -1 | 1,
+) {
+  const currentIndex = orderIds.indexOf(companyId);
+  if (currentIndex < 0) return [...orderIds];
+
+  const nextIndex = currentIndex + direction;
+  if (nextIndex < 0 || nextIndex >= orderIds.length) return [...orderIds];
+
+  const nextOrderIds = [...orderIds];
+  [nextOrderIds[currentIndex], nextOrderIds[nextIndex]] = [
+    nextOrderIds[nextIndex]!,
+    nextOrderIds[currentIndex]!,
+  ];
+  return nextOrderIds;
+}
+
+function companyOrderIndex(companyId: string | null | undefined, orderMap?: ReadonlyMap<string, number>) {
+  if (!companyId || !orderMap) return UNORDERED_COMPANY_INDEX;
+  return orderMap.get(companyId) ?? UNORDERED_COMPANY_INDEX;
+}
+
+function compareCompanyOptionsByOrder(
+  left: CompanyOption,
+  right: CompanyOption,
+  orderMap: ReadonlyMap<string, number>,
+) {
+  const orderDelta = companyOrderIndex(left.id, orderMap) - companyOrderIndex(right.id, orderMap);
+  if (orderDelta !== 0) return orderDelta;
+  return formatCompanyOptionLabel(left).localeCompare(formatCompanyOptionLabel(right));
+}
+
 function createDefaultWiringVisibility(
   enterpriseScope: EnterpriseGraphScopeMode,
   viewMode: OrgViewMode,
@@ -863,12 +968,40 @@ function countDirectAndIndirectReports(node: OrgNode): number {
   );
 }
 
-function sortRootsForPresentation(roots: OrgNode[]): OrgNode[] {
-  return [...roots].sort((left, right) => {
-    const reportDelta = countDirectAndIndirectReports(right) - countDirectAndIndirectReports(left);
-    if (reportDelta !== 0) return reportDelta;
-    return left.name.localeCompare(right.name);
-  });
+function compareOrgNodesForPresentation(
+  left: OrgNode,
+  right: OrgNode,
+  companyOrderMap?: ReadonlyMap<string, number>,
+) {
+  const companyOrderDelta =
+    companyOrderIndex(left.companyId, companyOrderMap) -
+    companyOrderIndex(right.companyId, companyOrderMap);
+  if (companyOrderDelta !== 0) return companyOrderDelta;
+
+  const reportDelta = countDirectAndIndirectReports(right) - countDirectAndIndirectReports(left);
+  if (reportDelta !== 0) return reportDelta;
+  return left.name.localeCompare(right.name);
+}
+
+function sortNodeReportsForPresentation(
+  node: OrgNode,
+  companyOrderMap?: ReadonlyMap<string, number>,
+): OrgNode {
+  return {
+    ...node,
+    reports: node.reports
+      .map((child) => sortNodeReportsForPresentation(child, companyOrderMap))
+      .sort((left, right) => compareOrgNodesForPresentation(left, right, companyOrderMap)),
+  };
+}
+
+function sortRootsForPresentation(
+  roots: OrgNode[],
+  companyOrderMap?: ReadonlyMap<string, number>,
+): OrgNode[] {
+  return roots
+    .map((root) => sortNodeReportsForPresentation(root, companyOrderMap))
+    .sort((left, right) => compareOrgNodesForPresentation(left, right, companyOrderMap));
 }
 
 function buildPreviewCollapsedNodeIds(
@@ -1259,11 +1392,40 @@ function buildCompanyGroups(
     .sort((left, right) => (left.y === right.y ? left.x - right.x : left.y - right.y));
 }
 
+function buildMergedCompanyGroupMap(groups: readonly CompanyGroup[]) {
+  const merged = new Map<string, CompanyGroup>();
+
+  for (const group of groups) {
+    const existing = merged.get(group.key);
+    if (!existing) {
+      merged.set(group.key, { ...group });
+      continue;
+    }
+
+    const minX = Math.min(existing.x, group.x);
+    const minY = Math.min(existing.y, group.y);
+    const maxX = Math.max(existing.x + existing.width, group.x + group.width);
+    const maxY = Math.max(existing.y + existing.height, group.y + group.height);
+    merged.set(group.key, {
+      ...existing,
+      x: minX,
+      y: minY,
+      width: maxX - minX,
+      height: maxY - minY,
+      nodeCount: existing.nodeCount + group.nodeCount,
+      accentColor: existing.accentColor,
+    });
+  }
+
+  return merged;
+}
+
 function buildCompanyHierarchyGroups(
   companies: Company[],
   nodes: EnterpriseGraphNode[],
   selectedCompanyId?: string | null,
   companyAccentById?: ReadonlyMap<string, string>,
+  companyOrderMap?: ReadonlyMap<string, number>,
 ): CompanyGroup[] {
   const companyById = new Map(companies.map((company) => [company.id, company]));
   const relevantCompanyIds = new Set<string>();
@@ -1309,8 +1471,15 @@ function buildCompanyHierarchyGroups(
     childrenByParentId.set(parentId, bucket);
   }
 
+  const compareCompanies = (left: Company, right: Company) => {
+    const orderDelta =
+      companyOrderIndex(left.id, companyOrderMap) - companyOrderIndex(right.id, companyOrderMap);
+    if (orderDelta !== 0) return orderDelta;
+    return left.name.localeCompare(right.name);
+  };
+
   for (const entry of childrenByParentId.values()) {
-    entry.sort((left, right) => left.name.localeCompare(right.name));
+    entry.sort(compareCompanies);
   }
 
   const measureSubtreeWidth = new Map<string, number>();
@@ -1367,9 +1536,7 @@ function buildCompanyHierarchyGroups(
     }
   };
 
-  const roots = (childrenByParentId.get(null) ?? []).sort((left, right) =>
-    left.name.localeCompare(right.name),
-  );
+  const roots = (childrenByParentId.get(null) ?? []).sort(compareCompanies);
   let rootLeft = 24;
   for (const root of roots) {
     const rootWidth = measure(root.id);
@@ -1490,6 +1657,7 @@ export function OrgChart({
   const [exportError, setExportError] = useState<string | null>(null);
   const [focusTarget, setFocusTarget] = useState<GraphFocusTarget>(null);
   const [selectedInspectorItem, setSelectedInspectorItem] = useState<InspectorItemKey | null>(null);
+  const [companyOrderIds, setCompanyOrderIds] = useState<string[]>([]);
 
   const chartAccent = selectedCompany?.brandColor ?? "#60a5fa";
   const effectiveViewMode = lockViewMode ?? viewMode;
@@ -1497,6 +1665,9 @@ export function OrgChart({
     fullscreen && compactFilters && startExpanded && selectedCompanyId
       ? buildCollapsedNodeIdsStorageKey(selectedCompanyId, enterpriseScope, effectiveViewMode)
       : null;
+  const companyOrderStorageKey = selectedCompanyId
+    ? buildCompanyOrderStorageKey(selectedCompanyId, enterpriseScope)
+    : null;
   const pageTitle = title ?? (fullscreen ? "Full Structure" : "Org Chart");
   const pageSubtitle =
     subtitle ??
@@ -1661,7 +1832,7 @@ export function OrgChart({
     return map;
   }, [enterpriseGraph]);
 
-  const companyOptions = useMemo<CompanyOption[]>(() => {
+  const defaultCompanyOptions = useMemo<CompanyOption[]>(() => {
     const optionById = new Map<string, CompanyOption>();
     for (const company of companies) {
       optionById.set(company.id, {
@@ -1684,6 +1855,23 @@ export function OrgChart({
       formatCompanyOptionLabel(left).localeCompare(formatCompanyOptionLabel(right)),
     );
   }, [companies, enterpriseGraph]);
+
+  useEffect(() => {
+    setCompanyOrderIds(readStoredCompanyOrderIds(companyOrderStorageKey, defaultCompanyOptions));
+  }, [companyOrderStorageKey, defaultCompanyOptions]);
+
+  const companyOrderMap = useMemo(
+    () => new Map(companyOrderIds.map((companyId, index) => [companyId, index])),
+    [companyOrderIds],
+  );
+
+  const companyOptions = useMemo<CompanyOption[]>(
+    () =>
+      [...defaultCompanyOptions].sort((left, right) =>
+        compareCompanyOptionsByOrder(left, right, companyOrderMap),
+      ),
+    [companyOrderMap, defaultCompanyOptions],
+  );
   const companyAccentById = useMemo(
     () =>
       new Map(
@@ -1754,8 +1942,9 @@ export function OrgChart({
     () =>
       sortRootsForPresentation(
         effectiveViewMode === "enterprise" ? enterpriseGraph?.roots ?? [] : orgTree ?? [],
+        companyOrderMap,
       ),
-    [effectiveViewMode, enterpriseGraph, orgTree],
+    [companyOrderMap, effectiveViewMode, enterpriseGraph, orgTree],
   );
 
   const childCountMap = useMemo(() => buildChildCountMap(rawRoots), [rawRoots]);
@@ -1935,12 +2124,14 @@ export function OrgChart({
               enterpriseGraph?.nodes ?? [],
               selectedCompanyId,
               companyAccentById,
+              companyOrderMap,
             )
         : [],
     [
       allNodes,
       companies,
       companyAccentById,
+      companyOrderMap,
       effectiveViewMode,
       enterpriseGraph,
       selectedCompanyId,
@@ -1948,7 +2139,7 @@ export function OrgChart({
     ],
   );
   const companyGroupsMap = useMemo(
-    () => new Map(companyGroups.map((group) => [group.key, group])),
+    () => buildMergedCompanyGroupMap(companyGroups),
     [companyGroups],
   );
   const companyLegendItems = useMemo(
@@ -2189,7 +2380,7 @@ export function OrgChart({
   }, [filteredRelationshipLinks, layoutNodeMap]);
 
   const companyAggregateEdges = useMemo<CompanyAggregateEdge[]>(() => {
-    if (effectiveViewMode !== "enterprise" || wiringVisibility.showAgents) return [];
+    if (effectiveViewMode !== "enterprise") return [];
 
     const edges: CompanyAggregateEdge[] = [];
 
@@ -2306,7 +2497,6 @@ export function OrgChart({
     filteredRelationshipLinks,
     hierarchyFocusStroke,
     matchesCompanyFilter,
-    wiringVisibility.showAgents,
     wiringVisibility.showRelationshipLines,
     wiringVisibility.showReportsToLines,
   ]);
@@ -3212,6 +3402,29 @@ export function OrgChart({
     requestGraphViewportReset,
   ]);
 
+  const moveCompanyInOrder = useCallback(
+    (companyId: string, direction: -1 | 1) => {
+      setCompanyOrderIds((previous) => {
+        const normalizedOrderIds = reconcileCompanyOrderIds(previous, defaultCompanyOptions);
+        const nextOrderIds = reconcileCompanyOrderIds(
+          moveCompanyOrderId(normalizedOrderIds, companyId, direction),
+          defaultCompanyOptions,
+        );
+        persistCompanyOrderIds(companyOrderStorageKey, nextOrderIds);
+        return nextOrderIds;
+      });
+      requestGraphViewportReset();
+    },
+    [companyOrderStorageKey, defaultCompanyOptions, requestGraphViewportReset],
+  );
+
+  const resetCompanyOrder = useCallback(() => {
+    const nextOrderIds = reconcileCompanyOrderIds(null, defaultCompanyOptions);
+    setCompanyOrderIds(nextOrderIds);
+    persistCompanyOrderIds(companyOrderStorageKey, nextOrderIds);
+    requestGraphViewportReset();
+  }, [companyOrderStorageKey, defaultCompanyOptions, requestGraphViewportReset]);
+
   const persistCollapsedNodeIdsForCurrentScope = useCallback(
     (nextCollapsedNodeIds: ReadonlySet<string>) => {
       persistStoredCollapsedNodeIds(collapseStateStorageKey, nextCollapsedNodeIds);
@@ -3938,6 +4151,55 @@ export function OrgChart({
                           </label>
                         );
                       })}
+                    </div>
+                    <div className="mt-3 border-t border-border/70 pt-3 dark:border-white/10">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                          Company Order
+                        </div>
+                        <Button size="sm" variant="outline" onClick={resetCompanyOrder}>
+                          Reset
+                        </Button>
+                      </div>
+                      <div
+                        data-company-order-menu
+                        className="mt-2 max-h-56 space-y-1 overflow-y-auto pr-1"
+                      >
+                        {companyLegendItems.map((item, index) => (
+                          <div
+                            key={`company-order:${item.id}`}
+                            data-company-order-item={item.id}
+                            className="flex items-center gap-2 rounded-xl border border-border/70 bg-background/70 px-2 py-1.5 dark:border-white/10 dark:bg-slate-950/65"
+                            style={colorSurfaceStyle(item.color)}
+                          >
+                            <span className="min-w-0 flex-1 text-[12px] font-medium text-foreground">
+                              <ColorLabel color={item.color} label={formatCompanyOptionLabel(item)} />
+                            </span>
+                            <div className="flex shrink-0 items-center gap-1">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 w-7 p-0"
+                                disabled={index === 0}
+                                onClick={() => moveCompanyInOrder(item.id, -1)}
+                                aria-label={`Move ${formatCompanyOptionLabel(item)} up`}
+                              >
+                                <ChevronUp className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 w-7 p-0"
+                                disabled={index === companyLegendItems.length - 1}
+                                onClick={() => moveCompanyInOrder(item.id, 1)}
+                                aria-label={`Move ${formatCompanyOptionLabel(item)} down`}
+                              >
+                                <ChevronDown className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2 border-t border-border/70 pt-3 dark:border-white/10">
                       <Button
@@ -4755,44 +5017,53 @@ export function OrgChart({
                   })
                 : null}
 
-              {!wiringVisibility.showAgents
+              {companyAggregateEdges.length > 0
                 ? companyAggregateEdges.map((edge) => {
                     const labelWidth = Math.max(edge.label.length * 6.35 + 22, 108);
                     const edgeHighlighted =
                       !enterpriseNodeFilterActive ||
                       highlightedCompanyKeys.has(edge.sourceKey) ||
                       highlightedCompanyKeys.has(edge.targetKey);
+                    const showCompanyAggregateLabel = !wiringVisibility.showAgents;
 
                     return (
-                      <g key={edge.id} opacity={edgeHighlighted ? 1 : 0.2}>
+                      <g
+                        key={edge.id}
+                        data-company-aggregate-link={edge.id}
+                        opacity={edgeHighlighted ? (wiringVisibility.showAgents ? 0.58 : 1) : 0.2}
+                      >
                         <path
                           d={edge.path}
                           fill="none"
                           stroke={edge.color}
                           strokeDasharray={edge.dashed ? "10 6" : undefined}
-                          strokeWidth={edge.dashed ? 2.5 : 2.1}
+                          strokeWidth={wiringVisibility.showAgents ? 1.7 : edge.dashed ? 2.5 : 2.1}
                           strokeLinecap="round"
                           strokeLinejoin="round"
                         />
-                        <rect
-                          x={edge.labelX - labelWidth / 2}
-                          y={edge.labelY - 10}
-                          width={labelWidth}
-                          height={20}
-                          rx={10}
-                          fill="rgba(15,23,42,0.88)"
-                          stroke={edge.color}
-                          strokeWidth={0.85}
-                        />
-                        <text
-                          x={edge.labelX}
-                          y={edge.labelY + 3}
-                          textAnchor="middle"
-                          fill="#f8fafc"
-                          className="text-[10px] font-medium"
-                        >
-                          {edge.label}
-                        </text>
+                        {showCompanyAggregateLabel ? (
+                          <>
+                            <rect
+                              x={edge.labelX - labelWidth / 2}
+                              y={edge.labelY - 10}
+                              width={labelWidth}
+                              height={20}
+                              rx={10}
+                              fill="rgba(15,23,42,0.88)"
+                              stroke={edge.color}
+                              strokeWidth={0.85}
+                            />
+                            <text
+                              x={edge.labelX}
+                              y={edge.labelY + 3}
+                              textAnchor="middle"
+                              fill="#f8fafc"
+                              className="text-[10px] font-medium"
+                            >
+                              {edge.label}
+                            </text>
+                          </>
+                        ) : null}
                       </g>
                     );
                   })
