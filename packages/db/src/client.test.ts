@@ -44,6 +44,30 @@ if (!embeddedPostgresSupport.supported) {
 
 describeEmbeddedPostgres("applyPendingMigrations", () => {
   it(
+    "uses journal timestamps when legacy hashes only partially resolve",
+    async () => {
+      const connectionString = await createTempDatabase();
+
+      await applyPendingMigrations(connectionString);
+
+      const sql = postgres(connectionString, { max: 1, onnotice: () => {} });
+      try {
+        const fastNorthstarHash = await migrationHash("0001_fast_northstar.sql");
+
+        await sql.unsafe(
+          `UPDATE "drizzle"."__drizzle_migrations" SET hash = 'legacy-fast-northstar-hash' WHERE hash = '${fastNorthstarHash}'`,
+        );
+      } finally {
+        await sql.end();
+      }
+
+      const finalState = await inspectMigrations(connectionString);
+      expect(finalState.status).toBe("upToDate");
+    },
+    20_000,
+  );
+
+  it(
     "applies an inserted earlier migration without replaying later legacy migrations",
     async () => {
       const connectionString = await createTempDatabase();
