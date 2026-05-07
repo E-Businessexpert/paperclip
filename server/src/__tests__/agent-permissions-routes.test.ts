@@ -37,6 +37,7 @@ const mockAgentService = vi.hoisted(() => ({
   create: vi.fn(),
   updatePermissions: vi.fn(),
   getChainOfCommand: vi.fn(),
+  getEnterpriseRelationshipsView: vi.fn(),
   resolveByReference: vi.fn(),
 }));
 
@@ -149,6 +150,13 @@ describe("agent permission routes", () => {
     mockGetTelemetryClient.mockReturnValue({ track: vi.fn() });
     mockAgentService.getById.mockResolvedValue(baseAgent);
     mockAgentService.getChainOfCommand.mockResolvedValue([]);
+    mockAgentService.getEnterpriseRelationshipsView.mockResolvedValue({
+      version: 1,
+      updatedAt: null,
+      customTypes: [],
+      availableTypes: [],
+      links: [],
+    });
     mockAgentService.resolveByReference.mockResolvedValue({ ambiguous: false, agent: baseAgent });
     mockAgentService.create.mockResolvedValue(baseAgent);
     mockAgentService.updatePermissions.mockResolvedValue(baseAgent);
