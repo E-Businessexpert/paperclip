@@ -153,4 +153,33 @@ describe("Sidebar", () => {
       root.unmount();
     });
   });
+
+  it("shows the full structure link directly under AgentChatTR", async () => {
+    mockInstanceSettingsApi.getExperimental.mockResolvedValue({ enableIsolatedWorkspaces: false });
+    const root = createRoot(container);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <Sidebar />
+        </QueryClientProvider>,
+      );
+    });
+    await flushReact();
+
+    const links = [...container.querySelectorAll("a")];
+    const agentChatIndex = links.findIndex((anchor) => anchor.textContent === "AgentChatTR");
+    const fullStructureLink = links[agentChatIndex + 1];
+
+    expect(agentChatIndex).toBeGreaterThanOrEqual(0);
+    expect(fullStructureLink?.textContent).toBe("Full Structure");
+    expect(fullStructureLink?.getAttribute("href")).toBe("/full-structure");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
 });

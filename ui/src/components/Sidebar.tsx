@@ -90,6 +90,7 @@ export function Sidebar() {
             alert={inboxBadge.failedRuns > 0}
           />
           <SidebarNavItem to="/chatrooms" label="AgentChatTR" icon={MessageSquare} />
+          <SidebarNavItem to="/full-structure" label="Full Structure" icon={Network} />
           <PluginSlotOutlet
             slotTypes={["sidebar"]}
             context={pluginContext}
