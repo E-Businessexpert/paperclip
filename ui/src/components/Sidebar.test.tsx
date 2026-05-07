@@ -103,7 +103,7 @@ describe("Sidebar", () => {
     vi.clearAllMocks();
   });
 
-  it("shows the full structure link directly under AgentChatTR", async () => {
+  it("shows only the full org chart link under the AgentChatTR menu section", async () => {
     const root = createRoot(container);
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
@@ -119,11 +119,10 @@ describe("Sidebar", () => {
     await flushReact();
 
     const links = [...container.querySelectorAll("a")];
-    const agentChatIndex = links.findIndex((anchor) => anchor.textContent === "AgentChatTR");
-    const fullStructureLink = links[agentChatIndex + 1];
+    const fullStructureLink = links.find((anchor) => anchor.textContent === "Full Org Chart");
 
-    expect(agentChatIndex).toBeGreaterThanOrEqual(0);
-    expect(fullStructureLink?.textContent).toBe("Full Structure");
+    expect(container.textContent).toContain("AgentChatTR");
+    expect(links.some((anchor) => anchor.getAttribute("href") === "/chatrooms")).toBe(false);
     expect(fullStructureLink?.getAttribute("href")).toBe("/full-structure");
 
     await act(async () => {
