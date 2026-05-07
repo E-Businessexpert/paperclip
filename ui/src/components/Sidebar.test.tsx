@@ -1,0 +1,133 @@
+// @vitest-environment jsdom
+
+import { act } from "react";
+import type { ReactNode } from "react";
+import { createRoot } from "react-dom/client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Sidebar } from "./Sidebar";
+
+const mockHeartbeatsApi = vi.hoisted(() => ({
+  liveRunsForCompany: vi.fn(),
+}));
+
+vi.mock("@/lib/router", () => ({
+  NavLink: ({
+    to,
+    children,
+    className,
+    onClick,
+  }: {
+    to: string;
+    children: ReactNode;
+    className?: string | ((state: { isActive: boolean }) => string);
+    onClick?: () => void;
+  }) => (
+    <a
+      href={to}
+      className={typeof className === "function" ? className({ isActive: false }) : className}
+      onClick={onClick}
+    >
+      {children}
+    </a>
+  ),
+}));
+
+vi.mock("../context/DialogContext", () => ({
+  useDialog: () => ({
+    openNewIssue: vi.fn(),
+  }),
+}));
+
+vi.mock("../context/CompanyContext", () => ({
+  useCompany: () => ({
+    selectedCompanyId: "company-1",
+    selectedCompany: {
+      id: "company-1",
+      issuePrefix: "PAP",
+      name: "Paperclip",
+      brandColor: null,
+    },
+  }),
+}));
+
+vi.mock("../context/SidebarContext", () => ({
+  useSidebar: () => ({
+    isMobile: false,
+    setSidebarOpen: vi.fn(),
+  }),
+}));
+
+vi.mock("../api/heartbeats", () => ({
+  heartbeatsApi: mockHeartbeatsApi,
+}));
+
+vi.mock("../hooks/useInboxBadge", () => ({
+  useInboxBadge: () => ({ inbox: 0, failedRuns: 0 }),
+}));
+
+vi.mock("@/plugins/slots", () => ({
+  PluginSlotOutlet: () => null,
+}));
+
+vi.mock("./SidebarProjects", () => ({
+  SidebarProjects: () => null,
+}));
+
+vi.mock("./SidebarAgents", () => ({
+  SidebarAgents: () => null,
+}));
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+async function flushReact() {
+  await act(async () => {
+    await Promise.resolve();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+  });
+}
+
+describe("Sidebar", () => {
+  let container: HTMLDivElement;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    mockHeartbeatsApi.liveRunsForCompany.mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    container.remove();
+    document.body.innerHTML = "";
+    vi.clearAllMocks();
+  });
+
+  it("shows the full structure link directly under AgentChatTR", async () => {
+    const root = createRoot(container);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <Sidebar />
+        </QueryClientProvider>,
+      );
+    });
+    await flushReact();
+
+    const links = [...container.querySelectorAll("a")];
+    const agentChatIndex = links.findIndex((anchor) => anchor.textContent === "AgentChatTR");
+    const fullStructureLink = links[agentChatIndex + 1];
+
+    expect(agentChatIndex).toBeGreaterThanOrEqual(0);
+    expect(fullStructureLink?.textContent).toBe("Full Structure");
+    expect(fullStructureLink?.getAttribute("href")).toBe("/full-structure");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+});
