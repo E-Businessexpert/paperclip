@@ -11,30 +11,41 @@ const mockHeartbeatsApi = vi.hoisted(() => ({
   liveRunsForCompany: vi.fn(),
 }));
 
-vi.mock("@/lib/router", () => ({
-  NavLink: ({
-    to,
-    children,
-    className,
-    onClick,
-  }: {
-    to: string;
-    children: ReactNode;
-    className?: string | ((state: { isActive: boolean }) => string);
-    onClick?: () => void;
-  }) => (
+const mockInstanceSettingsApi = vi.hoisted(() => ({
+  getExperimental: vi.fn(),
+}));
+
+function MockLink({
+  to,
+  children,
+  className,
+  ...props
+}: {
+  to: string;
+  children: ReactNode;
+  className?: string | ((state: { isActive: boolean }) => string);
+}) {
+  return (
     <a
       href={to}
       className={typeof className === "function" ? className({ isActive: false }) : className}
-      onClick={onClick}
+      {...props}
     >
       {children}
     </a>
-  ),
+  );
+}
+
+vi.mock("@/lib/router", () => ({
+  NavLink: MockLink,
+}));
+
+vi.mock("react-router-dom", () => ({
+  NavLink: MockLink,
 }));
 
 vi.mock("../context/DialogContext", () => ({
-  useDialog: () => ({
+  useDialogActions: () => ({
     openNewIssue: vi.fn(),
   }),
 }));
@@ -42,12 +53,7 @@ vi.mock("../context/DialogContext", () => ({
 vi.mock("../context/CompanyContext", () => ({
   useCompany: () => ({
     selectedCompanyId: "company-1",
-    selectedCompany: {
-      id: "company-1",
-      issuePrefix: "PAP",
-      name: "Paperclip",
-      brandColor: null,
-    },
+    selectedCompany: { id: "company-1", issuePrefix: "PAP", name: "Paperclip" },
   }),
 }));
 
@@ -62,12 +68,20 @@ vi.mock("../api/heartbeats", () => ({
   heartbeatsApi: mockHeartbeatsApi,
 }));
 
+vi.mock("../api/instanceSettings", () => ({
+  instanceSettingsApi: mockInstanceSettingsApi,
+}));
+
 vi.mock("../hooks/useInboxBadge", () => ({
   useInboxBadge: () => ({ inbox: 0, failedRuns: 0 }),
 }));
 
 vi.mock("@/plugins/slots", () => ({
   PluginSlotOutlet: () => null,
+}));
+
+vi.mock("./SidebarCompanyMenu", () => ({
+  SidebarCompanyMenu: () => <div>Company menu</div>,
 }));
 
 vi.mock("./SidebarProjects", () => ({
@@ -91,19 +105,7 @@ async function flushReact() {
 describe("Sidebar", () => {
   let container: HTMLDivElement;
 
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    mockHeartbeatsApi.liveRunsForCompany.mockResolvedValue([]);
-  });
-
-  afterEach(() => {
-    container.remove();
-    document.body.innerHTML = "";
-    vi.clearAllMocks();
-  });
-
-  it("shows only the full org chart link under the AgentChatTR menu section", async () => {
+  async function renderSidebar() {
     const root = createRoot(container);
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
@@ -118,12 +120,66 @@ describe("Sidebar", () => {
     });
     await flushReact();
 
-    const links = [...container.querySelectorAll("a")];
-    const fullStructureLink = links.find((anchor) => anchor.textContent === "Full Org Chart");
+    return root;
+  }
 
-    expect(container.textContent).toContain("AgentChatTR");
-    expect(links.some((anchor) => anchor.getAttribute("href") === "/chatrooms")).toBe(false);
-    expect(fullStructureLink?.getAttribute("href")).toBe("/full-structure");
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    mockHeartbeatsApi.liveRunsForCompany.mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    container.remove();
+    document.body.innerHTML = "";
+    vi.clearAllMocks();
+  });
+
+  it("links the global full org chart icon outside the company-prefixed nav", async () => {
+    mockInstanceSettingsApi.getExperimental.mockResolvedValue({ enableIsolatedWorkspaces: false });
+    const root = await renderSidebar();
+
+    const fullOrgLink = container.querySelector('a[aria-label="Full Org Chart"]');
+    expect(fullOrgLink?.getAttribute("href")).toBe("/full-structure");
+    expect(container.textContent).not.toContain("AgentChatTR");
+    expect([...container.querySelectorAll("a")].some((anchor) => anchor.getAttribute("href") === "/chatrooms")).toBe(false);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("links the top search icon to the search page without showing Search in Work nav", async () => {
+    mockInstanceSettingsApi.getExperimental.mockResolvedValue({ enableIsolatedWorkspaces: false });
+    const root = await renderSidebar();
+
+    const topSearchLink = container.querySelector('a[aria-label="Search"]');
+    expect(topSearchLink?.getAttribute("href")).toBe("/search");
+    const workLinks = [...container.querySelectorAll("nav a")].map((anchor) => anchor.textContent?.trim());
+    expect(workLinks).not.toContain("Search");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("does not flash the Workspaces link while experimental settings are loading", async () => {
+    mockInstanceSettingsApi.getExperimental.mockImplementation(() => new Promise(() => {}));
+    const root = await renderSidebar();
+
+    expect(container.textContent).not.toContain("Workspaces");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("shows the Workspaces link when isolated workspaces are enabled", async () => {
+    mockInstanceSettingsApi.getExperimental.mockResolvedValue({ enableIsolatedWorkspaces: true });
+    const root = await renderSidebar();
+
+    const link = [...container.querySelectorAll("a")].find((anchor) => anchor.textContent === "Workspaces");
+    expect(link?.getAttribute("href")).toBe("/workspaces");
 
     await act(async () => {
       root.unmount();

@@ -17,6 +17,7 @@ function company(id: string, name: string): Company {
     issueCounter: 0,
     budgetMonthlyCents: 0,
     spentMonthlyCents: 0,
+    attachmentMaxBytes: 0,
     requireBoardApprovalForNewAgents: true,
     feedbackDataSharingEnabled: false,
     feedbackDataSharingConsentAt: null,

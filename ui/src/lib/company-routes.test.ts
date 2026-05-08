@@ -9,13 +9,13 @@ import {
 describe("company routes", () => {
   it("treats execution workspace paths as board routes that need a company prefix", () => {
     expect(isBoardPathWithoutPrefix("/execution-workspaces/workspace-123")).toBe(true);
-    expect(isBoardPathWithoutPrefix("/execution-workspaces/workspace-123/issues")).toBe(true);
+    expect(isBoardPathWithoutPrefix("/execution-workspaces/workspace-123/routines")).toBe(true);
     expect(extractCompanyPrefixFromPath("/execution-workspaces/workspace-123")).toBeNull();
     expect(applyCompanyPrefix("/execution-workspaces/workspace-123", "PAP")).toBe(
       "/PAP/execution-workspaces/workspace-123",
     );
-    expect(applyCompanyPrefix("/execution-workspaces/workspace-123/issues", "PAP")).toBe(
-      "/PAP/execution-workspaces/workspace-123/issues",
+    expect(applyCompanyPrefix("/execution-workspaces/workspace-123/routines", "PAP")).toBe(
+      "/PAP/execution-workspaces/workspace-123/routines",
     );
   });
 
@@ -23,17 +23,16 @@ describe("company routes", () => {
     expect(toCompanyRelativePath("/PAP/execution-workspaces/workspace-123")).toBe(
       "/execution-workspaces/workspace-123",
     );
-    expect(toCompanyRelativePath("/PAP/execution-workspaces/workspace-123/configuration")).toBe(
-      "/execution-workspaces/workspace-123/configuration",
+    expect(toCompanyRelativePath("/PAP/execution-workspaces/workspace-123/routines")).toBe(
+      "/execution-workspaces/workspace-123/routines",
     );
   });
 
-  it("treats full structure as a company-prefixed standalone route when a company is active", () => {
-    expect(isBoardPathWithoutPrefix("/full-structure")).toBe(true);
+  it("treats full structure as a global route that is never company-prefixed", () => {
+    expect(isBoardPathWithoutPrefix("/full-structure")).toBe(false);
     expect(extractCompanyPrefixFromPath("/full-structure")).toBeNull();
-    expect(applyCompanyPrefix("/full-structure", "FAM")).toBe("/FAM/full-structure");
+    expect(applyCompanyPrefix("/full-structure", "FAM")).toBe("/full-structure");
     expect(applyCompanyPrefix("/FAM/full-structure", "FAM")).toBe("/FAM/full-structure");
-    expect(toCompanyRelativePath("/FAM/full-structure")).toBe("/full-structure");
   });
 
   /**
@@ -59,5 +58,13 @@ describe("company routes", () => {
 
   it("does not double-apply the prefix if already present", () => {
     expect(applyCompanyPrefix("/PAP/company/export", "PAP")).toBe("/PAP/company/export");
+  });
+
+  it("treats /search as a board route that needs a company prefix", () => {
+    expect(isBoardPathWithoutPrefix("/search")).toBe(true);
+    expect(extractCompanyPrefixFromPath("/search")).toBeNull();
+    expect(applyCompanyPrefix("/search", "PAP")).toBe("/PAP/search");
+    expect(applyCompanyPrefix("/search?q=hello%20world", "PAP")).toBe("/PAP/search?q=hello%20world");
+    expect(toCompanyRelativePath("/PAP/search?q=foo")).toBe("/search?q=foo");
   });
 });
