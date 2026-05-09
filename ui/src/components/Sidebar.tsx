@@ -13,6 +13,7 @@ import {
   GitBranch,
   Settings,
   Workflow,
+  MessageSquare,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { NavLink as RouterNavLink } from "react-router-dom";
@@ -103,6 +104,8 @@ export function Sidebar() {
             badgeTone={inboxBadge.failedRuns > 0 ? "danger" : "default"}
             alert={inboxBadge.failedRuns > 0}
           />
+          <SidebarNavItem to="/full-structure" label="Full Org Chart" icon={Workflow} />
+          <SidebarNavItem to="/chatrooms" label="AgentChatTR" icon={MessageSquare} />
           <PluginSlotOutlet
             slotTypes={["sidebar"]}
             context={pluginContext}
@@ -111,10 +114,6 @@ export function Sidebar() {
             missingBehavior="placeholder"
           />
         </div>
-
-        <SidebarSection label="AgentChatTR">
-          <SidebarNavItem to="/full-structure" label="Full Org Chart" icon={Workflow} />
-        </SidebarSection>
 
         <SidebarSection label="Work">
           <SidebarNavItem to="/issues" label="Issues" icon={CircleDot} />

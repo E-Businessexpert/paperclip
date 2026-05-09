@@ -68,4 +68,11 @@ describe("company routes", () => {
     expect(applyCompanyPrefix("/search?q=hello%20world", "PAP")).toBe("/PAP/search?q=hello%20world");
     expect(toCompanyRelativePath("/PAP/search?q=foo")).toBe("/search?q=foo");
   });
+
+  it("treats /chatrooms as the separate AgentChatTR board route", () => {
+    expect(isBoardPathWithoutPrefix("/chatrooms")).toBe(true);
+    expect(extractCompanyPrefixFromPath("/chatrooms")).toBeNull();
+    expect(applyCompanyPrefix("/chatrooms", "PAP")).toBe("/PAP/chatrooms");
+    expect(toCompanyRelativePath("/PAP/chatrooms")).toBe("/chatrooms");
+  });
 });

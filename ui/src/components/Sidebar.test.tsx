@@ -157,7 +157,7 @@ describe("Sidebar", () => {
     vi.clearAllMocks();
   });
 
-  it("keeps full org chart visible globally and under AgentChatTR", async () => {
+  it("keeps full org chart and AgentChatTR visible as separate app links", async () => {
     mockInstanceSettingsApi.getExperimental.mockResolvedValue({ enableIsolatedWorkspaces: false });
     const root = await renderSidebar();
 
@@ -168,7 +168,10 @@ describe("Sidebar", () => {
       (anchor) => anchor.textContent?.trim() === "Full Org Chart",
     );
     expect(fullOrgTextLink?.getAttribute("href")).toBe("/PAP/full-structure");
-    expect([...container.querySelectorAll("a")].some((anchor) => anchor.getAttribute("href") === "/chatrooms")).toBe(false);
+    const agentChatTRLink = [...container.querySelectorAll("a")].find(
+      (anchor) => anchor.textContent?.trim() === "AgentChatTR",
+    );
+    expect(agentChatTRLink?.getAttribute("href")).toBe("/PAP/chatrooms");
 
     await act(async () => {
       root.unmount();

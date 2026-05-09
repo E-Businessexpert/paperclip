@@ -27,6 +27,8 @@ import { Button } from "@/components/ui/button";
 import { agentsApi } from "../api/agents";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
 import { useCompany } from "../context/CompanyContext";
+import { shouldSyncCompanySelectionFromRoute } from "../lib/company-selection";
+import { FullStructureEnterpriseOrgChart } from "./FullStructureEnterpriseOrgChart";
 import { queryKeys } from "../lib/queryKeys";
 import { cn } from "../lib/utils";
 
@@ -733,7 +735,7 @@ function CompanyGraphCanvas({
   );
 }
 
-export function FullStructurePage() {
+export function FullStructureCorporationMapPage() {
   const pageRef = useRef<HTMLDivElement | null>(null);
   const location = useLocation();
   const { companyPrefix } = useParams<{ companyPrefix?: string }>();
@@ -1263,6 +1265,80 @@ export function FullStructurePage() {
           </section>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+export function FullStructurePage() {
+  const { companyPrefix } = useParams<{ companyPrefix?: string }>();
+  const location = useLocation();
+  const {
+    companies,
+    loading,
+    selectedCompanyId,
+    selectionSource,
+    setSelectedCompanyId,
+  } = useCompany();
+
+  const matchedCompany = useMemo(() => {
+    if (!companyPrefix) return null;
+    const normalized = companyPrefix.toUpperCase();
+    return companies.find((company) => company.issuePrefix.toUpperCase() === normalized) ?? null;
+  }, [companies, companyPrefix]);
+
+  const enterpriseRootCompany = useMemo(
+    () =>
+      companies.find((company) => /family trust/i.test(company.name))
+      ?? companies.find((company) => /cornerstone/i.test(company.name))
+      ?? matchedCompany
+      ?? companies[0]
+      ?? null,
+    [companies, matchedCompany],
+  );
+
+  useEffect(() => {
+    if (loading || !enterpriseRootCompany) return;
+    if (
+      shouldSyncCompanySelectionFromRoute({
+        selectionSource,
+        selectedCompanyId,
+        routeCompanyId: enterpriseRootCompany.id,
+      })
+    ) {
+      setSelectedCompanyId(enterpriseRootCompany.id, { source: "route_sync" });
+    }
+  }, [
+    enterpriseRootCompany,
+    loading,
+    selectedCompanyId,
+    selectionSource,
+    setSelectedCompanyId,
+  ]);
+
+  const backTo =
+    typeof (location.state as { backTo?: string } | null)?.backTo === "string"
+      ? (location.state as { backTo?: string }).backTo!
+      : "/dashboard";
+
+  return (
+    <div className="h-[100dvh] overflow-hidden overscroll-none bg-background px-3 pb-3 pt-0 md:px-5 md:pb-5">
+      <FullStructureEnterpriseOrgChart
+        fullscreen
+        initialViewMode="enterprise"
+        lockViewMode="enterprise"
+        startExpanded
+        defaultInspectorMinimized
+        compactFilters
+        enterpriseScope="family"
+        showBackButton
+        backHref={backTo}
+        title="Full Structure"
+        subtitle={
+          enterpriseRootCompany
+            ? `Family-wide wiring view rooted in ${enterpriseRootCompany.name}. Compare companies, collapse layers, and inspect routing across the full enterprise.`
+            : "Family-wide wiring view for the selected structure."
+        }
+      />
     </div>
   );
 }
