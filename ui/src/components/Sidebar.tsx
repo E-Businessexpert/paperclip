@@ -112,6 +112,10 @@ export function Sidebar() {
           />
         </div>
 
+        <SidebarSection label="AgentChatTR">
+          <SidebarNavItem to="/full-structure" label="Full Org Chart" icon={Workflow} />
+        </SidebarSection>
+
         <SidebarSection label="Work">
           <SidebarNavItem to="/issues" label="Issues" icon={CircleDot} />
           <SidebarNavItem to="/routines" label="Routines" icon={Repeat} />

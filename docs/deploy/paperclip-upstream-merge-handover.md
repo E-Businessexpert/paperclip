@@ -27,9 +27,10 @@ git rev-list --left-right --count HEAD...userfork/master
 ## Local Customizations To Preserve
 
 - The full organization view is a global route at `/full-structure`.
-- The full organization icon belongs in the universal sidebar top bar, not under a company and not inside `AgentChatTR`.
+- The full organization icon belongs in the universal sidebar top bar, and the same global link should also stay visible under the `AgentChatTR` sidebar section.
 - Company-prefixed `/FAM/full-structure` links should redirect to the global `/full-structure` route.
-- Do not add `/chatrooms` or `AgentChatTR` as a fake container for the full organization link.
+- Do not add `/chatrooms` as a fake container for the full organization link.
+- Do not turn `AgentChatTR` into a page that dumps every agent; it is a lightweight sidebar section for the full-org entry point unless a dedicated chatroom feature is restored intentionally.
 - Keep upstream's native company `OrgChart` page separate from the custom enterprise `FullStructure` page.
 - Preserve enterprise relationship metadata and permission fields in shared/server agent types.
 - Preserve database migration compatibility for previously-applied local migrations when upstream renumbers or replaces migration files.
@@ -38,8 +39,8 @@ git rev-list --left-right --count HEAD...userfork/master
 
 - Issue: upstream updates were claimed live while the fork was still behind `origin/master`.
   Fix: always record `HEAD...origin/master` before merging and after committing.
-- Issue: full organization link was placed under a company route or chat-room section.
-  Fix: use a raw React Router link to `/full-structure` in the sidebar top bar.
+- Issue: full organization link was placed under a company route or removed from the visible `AgentChatTR` menu section.
+  Fix: keep a raw React Router icon link to `/full-structure` in the sidebar top bar and a normal visible `Full Org Chart` nav item under `AgentChatTR`.
 - Issue: native upstream org-chart code was overwritten by the custom enterprise graph.
   Fix: keep `ui/src/pages/OrgChart.tsx` as upstream's company chart and keep `ui/src/pages/FullStructure.tsx` as the custom enterprise graph.
 - Issue: deployment recovery could restart an old image after reboot.
@@ -67,5 +68,5 @@ Expected route/link behavior:
 - `/full-structure` renders the global full organization chart.
 - `/:companyPrefix/full-structure` redirects to `/full-structure`.
 - The sidebar full-org icon href is `/full-structure`.
-- The sidebar does not contain `AgentChatTR`.
+- The sidebar contains an `AgentChatTR` section with a `Full Org Chart` link.
 - The sidebar does not add a `/chatrooms` full-org link.

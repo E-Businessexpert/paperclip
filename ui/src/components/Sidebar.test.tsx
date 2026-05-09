@@ -135,13 +135,17 @@ describe("Sidebar", () => {
     vi.clearAllMocks();
   });
 
-  it("links the global full org chart icon outside the company-prefixed nav", async () => {
+  it("keeps full org chart visible globally and under AgentChatTR", async () => {
     mockInstanceSettingsApi.getExperimental.mockResolvedValue({ enableIsolatedWorkspaces: false });
     const root = await renderSidebar();
 
     const fullOrgLink = container.querySelector('a[aria-label="Full Org Chart"]');
     expect(fullOrgLink?.getAttribute("href")).toBe("/full-structure");
-    expect(container.textContent).not.toContain("AgentChatTR");
+    expect(container.textContent).toContain("AgentChatTR");
+    const fullOrgTextLink = [...container.querySelectorAll("a")].find(
+      (anchor) => anchor.textContent?.trim() === "Full Org Chart",
+    );
+    expect(fullOrgTextLink?.getAttribute("href")).toBe("/full-structure");
     expect([...container.querySelectorAll("a")].some((anchor) => anchor.getAttribute("href") === "/chatrooms")).toBe(false);
 
     await act(async () => {
