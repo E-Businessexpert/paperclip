@@ -162,7 +162,7 @@ describe("Sidebar", () => {
     const root = await renderSidebar();
 
     const fullOrgLink = container.querySelector('a[aria-label="Full Org Chart"]');
-    expect(fullOrgLink?.getAttribute("href")).toBe("/full-structure");
+    expect(fullOrgLink?.getAttribute("href")).toBe("/PAP/full-structure");
     expect(container.textContent).toContain("AgentChatTR");
     const fullOrgTextLink = [...container.querySelectorAll("a")].find(
       (anchor) => anchor.textContent?.trim() === "Full Org Chart",

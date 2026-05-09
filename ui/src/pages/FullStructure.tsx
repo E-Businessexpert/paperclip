@@ -1275,6 +1275,7 @@ export function FullStructurePage() {
   const {
     companies,
     loading,
+    selectedCompany,
     selectedCompanyId,
     selectionSource,
     setSelectedCompanyId,
@@ -1286,34 +1287,30 @@ export function FullStructurePage() {
     return companies.find((company) => company.issuePrefix.toUpperCase() === normalized) ?? null;
   }, [companies, companyPrefix]);
 
-  const enterpriseRootCompany = useMemo(
-    () =>
-      companies.find((company) => /family trust/i.test(company.name))
-      ?? companies.find((company) => /cornerstone/i.test(company.name))
-      ?? matchedCompany
-      ?? companies[0]
-      ?? null,
-    [companies, matchedCompany],
+  const seedCompany = useMemo(
+    () => matchedCompany ?? selectedCompany ?? companies[0] ?? null,
+    [companies, matchedCompany, selectedCompany],
   );
 
   useEffect(() => {
-    if (loading || !enterpriseRootCompany) return;
-    if (
-      shouldSyncCompanySelectionFromRoute({
-        selectionSource,
-        selectedCompanyId,
-        routeCompanyId: enterpriseRootCompany.id,
-      })
-    ) {
-      setSelectedCompanyId(enterpriseRootCompany.id, { source: "route_sync" });
+    if (loading || !seedCompany) return;
+    if (matchedCompany) {
+      if (
+        shouldSyncCompanySelectionFromRoute({
+          selectionSource,
+          selectedCompanyId,
+          routeCompanyId: matchedCompany.id,
+        })
+      ) {
+        setSelectedCompanyId(matchedCompany.id, { source: "route_sync" });
+      }
+      return;
     }
-  }, [
-    enterpriseRootCompany,
-    loading,
-    selectedCompanyId,
-    selectionSource,
-    setSelectedCompanyId,
-  ]);
+
+    if (!selectedCompanyId) {
+      setSelectedCompanyId(seedCompany.id, { source: "route_sync" });
+    }
+  }, [loading, matchedCompany, seedCompany, selectedCompanyId, selectionSource, setSelectedCompanyId]);
 
   const backTo =
     typeof (location.state as { backTo?: string } | null)?.backTo === "string"
@@ -1334,8 +1331,8 @@ export function FullStructurePage() {
         backHref={backTo}
         title="Full Structure"
         subtitle={
-          enterpriseRootCompany
-            ? `Family-wide wiring view rooted in ${enterpriseRootCompany.name}. Compare companies, collapse layers, and inspect routing across the full enterprise.`
+          seedCompany
+            ? `Enterprise-wide wiring view seeded from ${seedCompany.name}. Compare all visible companies, collapse layers, and inspect routing across the full organization.`
             : "Family-wide wiring view for the selected structure."
         }
       />

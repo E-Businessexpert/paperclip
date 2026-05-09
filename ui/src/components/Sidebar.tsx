@@ -16,7 +16,6 @@ import {
   MessageSquare,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { NavLink as RouterNavLink } from "react-router-dom";
 import { NavLink } from "@/lib/router";
 import { SidebarSection } from "./SidebarSection";
 import { SidebarNavItem } from "./SidebarNavItem";
@@ -67,9 +66,9 @@ export function Sidebar() {
           aria-label="Full Org Chart"
           title="Full Org Chart"
         >
-          <RouterNavLink to="/full-structure">
+          <NavLink to="/full-structure">
             <Workflow className="h-4 w-4" />
-          </RouterNavLink>
+          </NavLink>
         </Button>
         <Button
           asChild
