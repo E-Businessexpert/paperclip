@@ -40,12 +40,16 @@ vi.mock("../components/AgentIconPicker", () => ({
 const orgTree = [
   {
     id: "agent-1",
+    companyId: "company-1",
+    companyName: "Paperclip",
     name: "CEO",
     role: "ceo",
     status: "active",
     reports: [
       {
         id: "agent-2",
+        companyId: "company-1",
+        companyName: "Paperclip",
         name: "Engineer",
         role: "engineer",
         status: "active",

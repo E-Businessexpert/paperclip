@@ -104,7 +104,6 @@ export function Sidebar() {
             badgeTone={inboxBadge.failedRuns > 0 ? "danger" : "default"}
             alert={inboxBadge.failedRuns > 0}
           />
-          <SidebarNavItem to="/full-structure" label="Full Org Chart" icon={Workflow} />
           <SidebarNavItem to="/chatrooms" label="AgentChatTR" icon={MessageSquare} />
           <PluginSlotOutlet
             slotTypes={["sidebar"]}

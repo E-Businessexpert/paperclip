@@ -23,6 +23,25 @@ const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 2;
 const TOUCH_MOVE_THRESHOLD = 6;
 
+function pruneOrgTreeToCompany(nodes: OrgNode[], companyId: string): OrgNode[] {
+  const result: OrgNode[] = [];
+
+  for (const node of nodes) {
+    const prunedChildren = pruneOrgTreeToCompany(node.reports, companyId);
+    if (node.companyId === companyId) {
+      result.push({
+        ...node,
+        reports: prunedChildren,
+      });
+      continue;
+    }
+
+    result.push(...prunedChildren);
+  }
+
+  return result;
+}
+
 // ── Tree layout types ───────────────────────────────────────────────────
 
 interface LayoutNode {
@@ -198,7 +217,11 @@ export function OrgChart() {
   }, [setBreadcrumbs]);
 
   // Layout computation
-  const layout = useMemo(() => layoutForest(orgTree ?? []), [orgTree]);
+  const companyOrgTree = useMemo(
+    () => (selectedCompanyId ? pruneOrgTreeToCompany(orgTree ?? [], selectedCompanyId) : []),
+    [orgTree, selectedCompanyId],
+  );
+  const layout = useMemo(() => layoutForest(companyOrgTree), [companyOrgTree]);
   const allNodes = useMemo(() => flattenLayout(layout), [layout]);
   const edges = useMemo(() => collectEdges(layout), [layout]);
 
@@ -436,7 +459,7 @@ export function OrgChart() {
     return <PageSkeleton variant="org-chart" />;
   }
 
-  if (orgTree && orgTree.length === 0) {
+  if (companyOrgTree.length === 0) {
     return <EmptyState icon={Network} message="No organizational hierarchy defined." />;
   }
 
