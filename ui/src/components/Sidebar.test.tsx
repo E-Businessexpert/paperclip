@@ -15,7 +15,7 @@ const mockInstanceSettingsApi = vi.hoisted(() => ({
   getExperimental: vi.fn(),
 }));
 
-function MockLink({
+function MockRouterLink({
   to,
   children,
   className,
@@ -36,12 +36,34 @@ function MockLink({
   );
 }
 
+function MockCompanyLink({
+  to,
+  children,
+  className,
+  ...props
+}: {
+  to: string;
+  children: ReactNode;
+  className?: string | ((state: { isActive: boolean }) => string);
+}) {
+  const href = to.startsWith("/") && to !== "/auth" ? `/PAP${to}` : to;
+  return (
+    <a
+      href={href}
+      className={typeof className === "function" ? className({ isActive: false }) : className}
+      {...props}
+    >
+      {children}
+    </a>
+  );
+}
+
 vi.mock("@/lib/router", () => ({
-  NavLink: MockLink,
+  NavLink: MockCompanyLink,
 }));
 
 vi.mock("react-router-dom", () => ({
-  NavLink: MockLink,
+  NavLink: MockRouterLink,
 }));
 
 vi.mock("../context/DialogContext", () => ({
@@ -145,7 +167,7 @@ describe("Sidebar", () => {
     const fullOrgTextLink = [...container.querySelectorAll("a")].find(
       (anchor) => anchor.textContent?.trim() === "Full Org Chart",
     );
-    expect(fullOrgTextLink?.getAttribute("href")).toBe("/full-structure");
+    expect(fullOrgTextLink?.getAttribute("href")).toBe("/PAP/full-structure");
     expect([...container.querySelectorAll("a")].some((anchor) => anchor.getAttribute("href") === "/chatrooms")).toBe(false);
 
     await act(async () => {
@@ -158,7 +180,7 @@ describe("Sidebar", () => {
     const root = await renderSidebar();
 
     const topSearchLink = container.querySelector('a[aria-label="Search"]');
-    expect(topSearchLink?.getAttribute("href")).toBe("/search");
+    expect(topSearchLink?.getAttribute("href")).toBe("/PAP/search");
     const workLinks = [...container.querySelectorAll("nav a")].map((anchor) => anchor.textContent?.trim());
     expect(workLinks).not.toContain("Search");
 
@@ -183,7 +205,7 @@ describe("Sidebar", () => {
     const root = await renderSidebar();
 
     const link = [...container.querySelectorAll("a")].find((anchor) => anchor.textContent === "Workspaces");
-    expect(link?.getAttribute("href")).toBe("/workspaces");
+    expect(link?.getAttribute("href")).toBe("/PAP/workspaces");
 
     await act(async () => {
       root.unmount();

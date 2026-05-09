@@ -1,5 +1,4 @@
 import { Navigate, Route, Routes, useLocation, useParams } from "@/lib/router";
-import { Navigate as RouterNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Layout } from "./components/Layout";
 import { OnboardingWizard } from "./components/OnboardingWizard";
@@ -79,6 +78,7 @@ function boardRoutes() {
       <Route path="settings/*" element={<LegacySettingsRedirect />} />
       <Route path="plugins/:pluginId" element={<PluginPage />} />
       <Route path="org" element={<OrgChart />} />
+      <Route path="full-structure" element={<FullStructurePage />} />
       <Route path="agents" element={<Navigate to="/agents/all" replace />} />
       <Route path="agents/all" element={<Agents />} />
       <Route path="agents/active" element={<Agents />} />
@@ -245,9 +245,27 @@ function UnprefixedBoardRedirect() {
   );
 }
 
-function CompanyFullStructureRedirect() {
+function DuplicateFullStructureRedirect() {
   const location = useLocation();
-  return <RouterNavigate to={`/full-structure${location.search}${location.hash}`} replace />;
+  const { companyPrefix, duplicateCompanyPrefix } = useParams<{
+    companyPrefix?: string;
+    duplicateCompanyPrefix?: string;
+  }>();
+
+  if (
+    companyPrefix
+    && duplicateCompanyPrefix
+    && companyPrefix.toUpperCase() === duplicateCompanyPrefix.toUpperCase()
+  ) {
+    return (
+      <Navigate
+        to={`/full-structure${location.search}${location.hash}`}
+        replace
+      />
+    );
+  }
+
+  return <NotFoundPage scope="global" />;
 }
 
 function NoCompaniesStartPage() {
@@ -323,7 +341,8 @@ export function App() {
           <Route path="execution-workspaces/:workspaceId/runtime-logs" element={<UnprefixedBoardRedirect />} />
           <Route path="execution-workspaces/:workspaceId/issues" element={<UnprefixedBoardRedirect />} />
           <Route path="execution-workspaces/:workspaceId/routines" element={<UnprefixedBoardRedirect />} />
-          <Route path=":companyPrefix/full-structure" element={<CompanyFullStructureRedirect />} />
+          <Route path=":companyPrefix/:duplicateCompanyPrefix/full-structure" element={<DuplicateFullStructureRedirect />} />
+          <Route path=":companyPrefix/full-structure" element={<FullStructurePage />} />
           <Route path=":companyPrefix" element={<Layout />}>
             {boardRoutes()}
           </Route>

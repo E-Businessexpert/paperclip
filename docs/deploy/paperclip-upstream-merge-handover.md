@@ -26,9 +26,10 @@ git rev-list --left-right --count HEAD...userfork/master
 
 ## Local Customizations To Preserve
 
-- The full organization view is a global route at `/full-structure`.
-- The full organization icon belongs in the universal sidebar top bar, and the same global link should also stay visible under the `AgentChatTR` sidebar section.
-- Company-prefixed `/FAM/full-structure` links should redirect to the global `/full-structure` route.
+- The full organization view supports both `/full-structure` and company-scoped routes like `/FAM/full-structure`.
+- The full organization icon belongs in the universal sidebar top bar and may link to the global `/full-structure` route.
+- The visible `AgentChatTR` sidebar section must keep a `Full Org Chart` item that uses the active company prefix, for example `/FAM/full-structure`.
+- Company-prefixed `/FAM/full-structure` links must render the full-structure page in the company context; do not redirect them away to the global route.
 - Do not add `/chatrooms` as a fake container for the full organization link.
 - Do not turn `AgentChatTR` into a page that dumps every agent; it is a lightweight sidebar section for the full-org entry point unless a dedicated chatroom feature is restored intentionally.
 - Keep upstream's native company `OrgChart` page separate from the custom enterprise `FullStructure` page.
@@ -39,8 +40,8 @@ git rev-list --left-right --count HEAD...userfork/master
 
 - Issue: upstream updates were claimed live while the fork was still behind `origin/master`.
   Fix: always record `HEAD...origin/master` before merging and after committing.
-- Issue: full organization link was placed under a company route or removed from the visible `AgentChatTR` menu section.
-  Fix: keep a raw React Router icon link to `/full-structure` in the sidebar top bar and a normal visible `Full Org Chart` nav item under `AgentChatTR`.
+- Issue: full organization link was made global-only, so the visible `AgentChatTR` menu item no longer behaved as a per-company app link.
+  Fix: keep a raw React Router icon link to `/full-structure` in the sidebar top bar, but keep the `AgentChatTR` `Full Org Chart` item on the prefix-aware router so it resolves to `/:companyPrefix/full-structure`.
 - Issue: native upstream org-chart code was overwritten by the custom enterprise graph.
   Fix: keep `ui/src/pages/OrgChart.tsx` as upstream's company chart and keep `ui/src/pages/FullStructure.tsx` as the custom enterprise graph.
 - Issue: deployment recovery could restart an old image after reboot.
@@ -66,7 +67,7 @@ pnpm exec vitest run --project @paperclipai/ui ui/src/components/Sidebar.test.ts
 Expected route/link behavior:
 
 - `/full-structure` renders the global full organization chart.
-- `/:companyPrefix/full-structure` redirects to `/full-structure`.
+- `/:companyPrefix/full-structure` renders the full-structure page in company context and scopes the graph to that connected company graph.
 - The sidebar full-org icon href is `/full-structure`.
-- The sidebar contains an `AgentChatTR` section with a `Full Org Chart` link.
+- The sidebar contains an `AgentChatTR` section with a `Full Org Chart` link whose href includes the active company prefix.
 - The sidebar does not add a `/chatrooms` full-org link.

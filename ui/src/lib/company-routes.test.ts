@@ -28,11 +28,12 @@ describe("company routes", () => {
     );
   });
 
-  it("treats full structure as a global route that is never company-prefixed", () => {
-    expect(isBoardPathWithoutPrefix("/full-structure")).toBe(false);
+  it("treats full structure as a board route that needs a company prefix", () => {
+    expect(isBoardPathWithoutPrefix("/full-structure")).toBe(true);
     expect(extractCompanyPrefixFromPath("/full-structure")).toBeNull();
-    expect(applyCompanyPrefix("/full-structure", "FAM")).toBe("/full-structure");
+    expect(applyCompanyPrefix("/full-structure", "FAM")).toBe("/FAM/full-structure");
     expect(applyCompanyPrefix("/FAM/full-structure", "FAM")).toBe("/FAM/full-structure");
+    expect(toCompanyRelativePath("/FAM/full-structure")).toBe("/full-structure");
   });
 
   /**
