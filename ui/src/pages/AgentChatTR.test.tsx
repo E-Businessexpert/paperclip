@@ -231,6 +231,9 @@ describe("AgentChatTR", () => {
     expect(container.textContent).toContain("All visible companies");
     expect(container.textContent).toContain("Oussama Ben Rhouma Trust Steward");
     expect(container.textContent).toContain("Cornerstone President");
+    expect(container.textContent).toContain("Chatrooms");
+    expect(container.textContent).toContain("Generated fallback rooms");
+    expect(container.textContent).toContain("#family-trust-executive");
     expect(container.querySelector('a[href="/FAM/agents/oussama-ben-rhouma-trust-steward"]')).toBeTruthy();
 
     await act(async () => {
@@ -248,6 +251,8 @@ describe("AgentChatTR", () => {
       "cor-id",
       expect.objectContaining({ assigneeAgentId: "cornerstone-president" }),
     );
+    expect(container.textContent).toContain("#cornerstone-holding-executive");
+    expect(container.textContent).toContain("#cornerstone-holding-relay");
 
     await act(async () => {
       root.unmount();

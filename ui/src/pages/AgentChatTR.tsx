@@ -45,6 +45,12 @@ interface AgentChatTRProps {
   scope?: AgentChatTRScope;
 }
 
+interface AgentChatroomCard {
+  room: string;
+  label: string;
+  description: string;
+}
+
 function findGlobalSeedCompany(companies: Company[], selectedCompany: Company | null) {
   const activeCompanies = companies.filter((company) => company.status !== "archived");
   return (
@@ -346,6 +352,27 @@ export function AgentChatTR({ scope = "company" }: AgentChatTRProps = {}) {
       ? parsedChatroom.frontmatter.dashboard
       : null,
   );
+  const primaryRoom =
+    typeof parsedChatroom?.frontmatter.primaryRoom === "string"
+      ? parsedChatroom.frontmatter.primaryRoom
+      : teamRoomForName(selectedTeamName);
+  const executiveRoomForSelectedAgent = executiveRoomForDashboard(selectedDashboard);
+  const relayRoomForSelectedAgent = relayRoomForDashboard(selectedDashboard);
+  const chatroomCards = useMemo<AgentChatroomCard[]>(() => {
+    const rooms = new Map<string, AgentChatroomCard>();
+    const addRoom = (room: string, label: string, description: string) => {
+      if (!room || rooms.has(room)) return;
+      rooms.set(room, { room, label, description });
+    };
+
+    addRoom(primaryRoom, "Primary room", "Default working room for this agent and team.");
+    addRoom(executiveRoomForSelectedAgent, "Executive room", "Upward reporting and manager escalation room.");
+    addRoom(relayRoomForSelectedAgent, "Relay room", "Cross-company relay room for handoffs and dependencies.");
+    for (const room of parsedChatroom?.roomAccess ?? []) {
+      addRoom(room, "Managed room", "Room declared by the agent's managed CHATROOM.md.");
+    }
+    return Array.from(rooms.values());
+  }, [executiveRoomForSelectedAgent, parsedChatroom?.roomAccess, primaryRoom, relayRoomForSelectedAgent]);
 
   if (directoryQuery.isLoading && scopedAgents.length === 0) {
     return <PageSkeleton variant="detail" />;
@@ -504,11 +531,7 @@ export function AgentChatTR({ scope = "company" }: AgentChatTRProps = {}) {
                     <div className="mt-3 flex flex-wrap gap-2">
                       <Badge variant="outline">{selectedAgent.companyName ?? "Unknown company"}</Badge>
                       <Badge variant="outline">{selectedDashboard}</Badge>
-                      <Badge variant="outline">
-                        {typeof parsedChatroom?.frontmatter.primaryRoom === "string"
-                          ? parsedChatroom.frontmatter.primaryRoom
-                          : teamRoomForName(selectedTeamName)}
-                      </Badge>
+                      <Badge variant="outline">{primaryRoom}</Badge>
                       {reportsToName ? (
                         <Badge variant="secondary">Reports to {reportsToName}</Badge>
                       ) : null}
@@ -557,9 +580,9 @@ export function AgentChatTR({ scope = "company" }: AgentChatTRProps = {}) {
                       {(parsedChatroom?.roomAccess.length
                         ? parsedChatroom.roomAccess
                         : [
-                            teamRoomForName(selectedTeamName),
-                            executiveRoomForDashboard(selectedDashboard),
-                            relayRoomForDashboard(selectedDashboard),
+                            primaryRoom,
+                            executiveRoomForSelectedAgent,
+                            relayRoomForSelectedAgent,
                           ].filter((room, index, list) => list.indexOf(room) === index)
                       ).map((room) => (
                         <Badge key={room} variant="outline">
@@ -588,6 +611,46 @@ export function AgentChatTR({ scope = "company" }: AgentChatTRProps = {}) {
                         </div>
                       </div>
                     </div>
+                  </div>
+                </div>
+
+                <div className="border-t border-border px-5 py-4">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <div className="flex items-center gap-2 text-sm font-semibold">
+                        <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                        Chatrooms
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        These are the active AgentChatTR rooms for the selected agent.
+                      </p>
+                    </div>
+                    <Badge variant="outline">
+                      {chatroomCards.length} chatroom{chatroomCards.length === 1 ? "" : "s"}
+                    </Badge>
+                  </div>
+                  {!chatroomFileQuery.data ? (
+                    <div className="mt-3 rounded-md border border-amber-300/60 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-400/40 dark:bg-amber-950/30 dark:text-amber-200">
+                      Generated fallback rooms: no managed <code>CHATROOM.md</code> file was found for this agent yet.
+                    </div>
+                  ) : null}
+                  <div className="mt-3 grid gap-3 md:grid-cols-3">
+                    {chatroomCards.map((card) => (
+                      <div
+                        key={card.room}
+                        className="rounded-lg border border-border bg-background p-3"
+                      >
+                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                          {card.label}
+                        </div>
+                        <div className="mt-1 break-all font-mono text-sm font-semibold">
+                          {card.room}
+                        </div>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          {card.description}
+                        </p>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
