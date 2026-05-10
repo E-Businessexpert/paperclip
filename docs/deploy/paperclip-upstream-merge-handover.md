@@ -23,6 +23,7 @@ git rev-list --left-right --count HEAD...userfork/master
 4. Resolve conflicts by keeping upstream product updates and explicitly preserving local enterprise extensions.
 5. Run the validation checklist below before commit, push, image build, or Portainer deployment.
 6. When deploying a new image tag, update both Portainer stack configuration and the host recovery compose files so reboot/recovery cannot roll back to an old image.
+7. Keep the Dockerfile compatible with the live VM's legacy Docker builder; do not depend on BuildKit-only glob behavior for dependency-cache `COPY` steps.
 
 ## Local Customizations To Preserve
 
@@ -65,6 +66,10 @@ git rev-list --left-right --count HEAD...userfork/master
   Fix: update Portainer stack and host recovery compose files to the same image tag.
 - Issue: migration numbering collided with upstream migrations.
   Fix: keep upstream migration numbering and preserve live-db compatibility in migration loading logic instead of keeping duplicate numbered local migrations.
+- Issue: Portainer tar-context uploads can fail before stack update with stream copy errors.
+  Fix: if the stack was not updated, deploy through the VM SSH fallback: build the base image from the pushed Git commit on `ubuntu@10.0.15.5`, build the runtime wrapper in `/srv/apps/stacks/paperclip-deploy`, update both `compose.yaml` and `recovery.override.yaml`, then restart with `docker compose`.
+- Issue: the live VM Docker builder does not reliably handle `COPY --parents` wildcard paths.
+  Fix: use explicit package paths for current workspace dependency-cache copies, such as `packages/plugins/sandbox-providers/e2b/package.json`.
 
 ## Validation Checklist
 
