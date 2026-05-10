@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowUpRight,
@@ -31,7 +31,7 @@ import {
   resolveCompanyDashboard,
   teamRoomForName,
 } from "@/lib/agent-chattr";
-import { Link } from "@/lib/router";
+import { Link, useSearchParams } from "@/lib/router";
 import { queryKeys } from "@/lib/queryKeys";
 import { agentUrl, cn, issueUrl } from "@/lib/utils";
 
@@ -90,9 +90,11 @@ function filterAgent(agent: WorkspaceAgent, query: string) {
 export function AgentChatTR({ scope = "company" }: AgentChatTRProps = {}) {
   const { companies, selectedCompany, selectedCompanyId } = useCompany();
   const { setBreadcrumbs } = useBreadcrumbs();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const isGlobalScope = scope === "global";
+  const requestedAgentId = (searchParams.get("agentId") ?? searchParams.get("agent") ?? "").trim() || null;
   const globalSeedCompany = useMemo(
     () => findGlobalSeedCompany(companies, selectedCompany),
     [companies, selectedCompany],
@@ -193,6 +195,22 @@ export function AgentChatTR({ scope = "company" }: AgentChatTRProps = {}) {
     [scopedAgents, search],
   );
 
+  const selectAgent = useCallback(
+    (nextAgentId: string) => {
+      setSelectedAgentId(nextAgentId);
+      setSearchParams(
+        (current) => {
+          const next = new URLSearchParams(current);
+          next.set("agentId", nextAgentId);
+          next.delete("agent");
+          return next;
+        },
+        { replace: false },
+      );
+    },
+    [setSearchParams],
+  );
+
   const defaultAgentId = useMemo(() => {
     if (isGlobalScope) {
       const trustOwner = scopedAgents.reduce<{ agent: WorkspaceAgent | null; priority: number }>(
@@ -216,9 +234,15 @@ export function AgentChatTR({ scope = "company" }: AgentChatTRProps = {}) {
       setSelectedAgentId(null);
       return;
     }
+    if (requestedAgentId && agentMap.has(requestedAgentId)) {
+      if (selectedAgentId !== requestedAgentId) {
+        setSelectedAgentId(requestedAgentId);
+      }
+      return;
+    }
     if (selectedAgentId && agentMap.has(selectedAgentId)) return;
     setSelectedAgentId(defaultAgentId);
-  }, [agentMap, defaultAgentId, scopedAgents.length, selectedAgentId]);
+  }, [agentMap, defaultAgentId, requestedAgentId, scopedAgents.length, selectedAgentId]);
 
   const selectedAgent = selectedAgentId ? agentMap.get(selectedAgentId) ?? null : null;
   const selectedAgentCompanyId = selectedAgent?.companyId ?? boardCompanyId ?? null;
@@ -424,7 +448,7 @@ export function AgentChatTR({ scope = "company" }: AgentChatTRProps = {}) {
                     <button
                       key={agent.id}
                       type="button"
-                      onClick={() => setSelectedAgentId(agent.id)}
+                      onClick={() => selectAgent(agent.id)}
                       className={cn(
                         "w-full px-4 py-3 text-left transition-colors hover:bg-accent/50",
                         isSelected && "bg-accent/60",

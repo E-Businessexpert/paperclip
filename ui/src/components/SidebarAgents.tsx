@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronRight,
   MoreHorizontal,
+  MessageSquare,
   PauseCircle,
   Pencil,
   PlayCircle,
@@ -19,6 +20,7 @@ import { heartbeatsApi } from "../api/heartbeats";
 import { SIDEBAR_SCROLL_RESET_STATE } from "../lib/navigation-scroll";
 import { queryKeys } from "../lib/queryKeys";
 import { cn, agentRouteRef, agentUrl } from "../lib/utils";
+import { buildAgentChatTRPath } from "../lib/agent-chattr-routes";
 import { useAgentOrder } from "../hooks/useAgentOrder";
 import { AgentIcon } from "./AgentIconPicker";
 import { BudgetSidebarMarker } from "./BudgetSidebarMarker";
@@ -59,6 +61,7 @@ function SidebarAgentItem({
   const routeRef = agentRouteRef(agent);
   const href = activeTab ? `${agentUrl(agent)}/${activeTab}` : agentUrl(agent);
   const editHref = `${agentUrl(agent)}/configuration`;
+  const chatTRHref = buildAgentChatTRPath({ agentId: agent.id });
   const isActive = activeAgentId === routeRef;
   const isPaused = agent.status === "paused";
   const isBudgetPaused = isPaused && agent.pauseReason === "budget";
@@ -124,6 +127,17 @@ function SidebarAgentItem({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuItem asChild>
+            <Link
+              to={chatTRHref}
+              onClick={() => {
+                if (isMobile) setSidebarOpen(false);
+              }}
+            >
+              <MessageSquare className="size-4" />
+              <span>Open AgentChatTR</span>
+            </Link>
+          </DropdownMenuItem>
           <DropdownMenuItem asChild>
             <Link
               to={editHref}

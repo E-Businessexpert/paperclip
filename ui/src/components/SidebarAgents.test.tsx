@@ -196,6 +196,9 @@ describe("SidebarAgents", () => {
 
     const editLink = Array.from(document.body.querySelectorAll("a"))
       .find((element) => element.textContent?.includes("Edit agent"));
+    const agentChatTRLink = Array.from(document.body.querySelectorAll("a"))
+      .find((element) => element.textContent?.includes("Open AgentChatTR"));
+    expect(agentChatTRLink?.getAttribute("href")).toBe("/chatrooms?agentId=agent-1");
     expect(editLink?.getAttribute("href")).toBe("/agents/alpha/configuration");
     expect(document.body.textContent).toContain("Pause agent");
 

@@ -75,6 +75,7 @@ import {
   ArrowLeft,
   HelpCircle,
   FolderOpen,
+  MessageSquare,
 } from "lucide-react";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -102,6 +103,7 @@ import {
 } from "@paperclipai/shared";
 import { redactHomePathUserSegments, redactHomePathUserSegmentsInValue } from "@paperclipai/adapter-utils";
 import { agentRouteRef } from "../lib/utils";
+import { buildAgentChatTRPath } from "../lib/agent-chattr-routes";
 import {
   applyAgentSkillSnapshot,
   arraysEqual,
@@ -969,6 +971,10 @@ export function AgentDetail() {
   }
   const isPendingApproval = agent.status === "pending_approval";
   const showConfigActionBar = (activeView === "configuration" || activeView === "instructions") && (configDirty || configSaving);
+  const agentChatTRHref = buildAgentChatTRPath({
+    agentId: agent.id,
+    companyPrefix: canonicalCompanyPrefix ?? companyPrefix ?? null,
+  });
 
   return (
     <div className={cn("space-y-6", isMobile && showConfigActionBar && "pb-24")}>
@@ -992,6 +998,12 @@ export function AgentDetail() {
           </div>
         </div>
         <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+          <Button variant="outline" size="sm" asChild>
+            <Link to={agentChatTRHref} aria-label={`Open AgentChatTR for ${agent.name}`}>
+              <MessageSquare className="h-3.5 w-3.5 sm:mr-1" />
+              <span className="hidden sm:inline">AgentChatTR</span>
+            </Link>
+          </Button>
           <Button
             variant="outline"
             size="sm"

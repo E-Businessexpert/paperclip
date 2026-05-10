@@ -21,6 +21,19 @@ const mockIssuesApi = vi.hoisted(() => ({
 }));
 
 const mockSetBreadcrumbs = vi.hoisted(() => vi.fn());
+const mockSearchParamsState = vi.hoisted(() => {
+  const state = {
+    params: new URLSearchParams(),
+    setSearchParams: vi.fn((nextInit: unknown) => {
+      const next =
+        typeof nextInit === "function"
+          ? (nextInit as (current: URLSearchParams) => URLSearchParams)(state.params)
+          : nextInit;
+      state.params = new URLSearchParams(next as URLSearchParams);
+    }),
+  };
+  return state;
+});
 
 function MockLink({
   to,
@@ -71,6 +84,7 @@ vi.mock("@/context/CompanyContext", () => ({
 
 vi.mock("@/lib/router", () => ({
   Link: MockLink,
+  useSearchParams: () => [mockSearchParamsState.params, mockSearchParamsState.setSearchParams],
 }));
 
 vi.mock("@/components/MarkdownBody", () => ({
@@ -147,6 +161,8 @@ describe("AgentChatTR", () => {
   beforeEach(() => {
     container = document.createElement("div");
     document.body.appendChild(container);
+    mockSearchParamsState.params = new URLSearchParams();
+    mockSearchParamsState.setSearchParams.mockClear();
 
     mockAgentsApi.listGlobal.mockResolvedValue([
       agent({
@@ -216,6 +232,22 @@ describe("AgentChatTR", () => {
     expect(container.textContent).toContain("Oussama Ben Rhouma Trust Steward");
     expect(container.textContent).toContain("Cornerstone President");
     expect(container.querySelector('a[href="/FAM/agents/oussama-ben-rhouma-trust-steward"]')).toBeTruthy();
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("opens a direct AgentChatTR room from the agentId query string", async () => {
+    mockSearchParamsState.params = new URLSearchParams("agentId=cornerstone-president");
+    const root = await renderAgentChatTR("global");
+    await flushReact();
+
+    expect(mockAgentsApi.instructionsBundle).toHaveBeenLastCalledWith("cornerstone-president", "cor-id");
+    expect(mockIssuesApi.list).toHaveBeenLastCalledWith(
+      "cor-id",
+      expect.objectContaining({ assigneeAgentId: "cornerstone-president" }),
+    );
 
     await act(async () => {
       root.unmount();

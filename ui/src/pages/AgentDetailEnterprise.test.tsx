@@ -352,6 +352,10 @@ describe("AgentDetail enterprise dashboard", () => {
     expect(container.textContent).toContain("Metadata & Runtime Configuration");
     expect(container.textContent).toContain("***REDACTED***");
     expect(container.textContent).not.toContain("secret-value");
+    expect(
+      container.querySelector('a[aria-label="Open AgentChatTR for Oussama Ben Rhouma Trust Steward"]')
+        ?.getAttribute("href"),
+    ).toBe("/FAM/chatrooms?agentId=trust-steward-id");
 
     await act(async () => {
       root.unmount();
