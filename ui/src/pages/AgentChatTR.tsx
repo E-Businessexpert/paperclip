@@ -10,7 +10,7 @@ import {
   Waypoints,
   Workflow,
 } from "lucide-react";
-import type { EnterpriseGraphLink } from "@paperclipai/shared";
+import type { Company, EnterpriseGraphLink } from "@paperclipai/shared";
 import { agentsApi, type AgentDirectoryEntry } from "@/api/agents";
 import { issuesApi } from "@/api/issues";
 import { AgentIcon } from "@/components/AgentIconPicker";
@@ -39,6 +39,45 @@ type WorkspaceAgent = AgentDirectoryEntry & {
   linked: boolean;
 };
 
+type AgentChatTRScope = "company" | "global";
+
+interface AgentChatTRProps {
+  scope?: AgentChatTRScope;
+}
+
+function findGlobalSeedCompany(companies: Company[], selectedCompany: Company | null) {
+  const activeCompanies = companies.filter((company) => company.status !== "archived");
+  return (
+    activeCompanies.find((company) =>
+      company.issuePrefix.toUpperCase() === "FAM" ||
+      /family\s+trust|trust/i.test(company.name),
+    ) ??
+    selectedCompany ??
+    activeCompanies[0] ??
+    companies[0] ??
+    null
+  );
+}
+
+function agentCompanyHref(agent: AgentDirectoryEntry, companiesById: Map<string, Company>) {
+  const prefix = companiesById.get(agent.companyId)?.issuePrefix;
+  const path = agentUrl(agent);
+  return prefix ? `/${prefix}${path}` : path;
+}
+
+function trustOwnerPriority(agent: WorkspaceAgent, seedCompanyId: string | null) {
+  if (seedCompanyId && agent.companyId !== seedCompanyId) return 0;
+  const haystack = [agent.name, agent.title ?? "", agent.role, agent.capabilities ?? ""]
+    .join(" ")
+    .toLowerCase();
+  if (haystack.includes("trust steward")) return 5;
+  if (haystack.includes("trust owner")) return 4;
+  if (haystack.includes("ceo") || haystack.includes("chief executive")) return 3;
+  if (haystack.includes("owner")) return 2;
+  if (haystack.includes("trust")) return 1;
+  return 0;
+}
+
 function filterAgent(agent: WorkspaceAgent, query: string) {
   if (!query) return true;
   const needle = query.toLowerCase();
@@ -48,48 +87,60 @@ function filterAgent(agent: WorkspaceAgent, query: string) {
     .includes(needle);
 }
 
-export function AgentChatTR() {
-  const { selectedCompany, selectedCompanyId } = useCompany();
+export function AgentChatTR({ scope = "company" }: AgentChatTRProps = {}) {
+  const { companies, selectedCompany, selectedCompanyId } = useCompany();
   const { setBreadcrumbs } = useBreadcrumbs();
   const [search, setSearch] = useState("");
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const isGlobalScope = scope === "global";
+  const globalSeedCompany = useMemo(
+    () => findGlobalSeedCompany(companies, selectedCompany),
+    [companies, selectedCompany],
+  );
+  const boardCompany = isGlobalScope ? globalSeedCompany : selectedCompany;
+  const boardCompanyId = boardCompany?.id ?? null;
+  const enterpriseScope = isGlobalScope ? "family" : "company";
+  const companiesById = useMemo(
+    () => new Map(companies.map((company) => [company.id, company])),
+    [companies],
+  );
 
   useEffect(() => {
-    setBreadcrumbs([{ label: "AgentChatTR" }]);
-  }, [setBreadcrumbs]);
+    setBreadcrumbs([{ label: isGlobalScope ? "Global AgentChatTR" : "Company AgentChatTR" }]);
+  }, [isGlobalScope, setBreadcrumbs]);
 
   const directoryQuery = useQuery({
-    queryKey: selectedCompanyId
-      ? [...queryKeys.agents.listGlobal, selectedCompanyId, "agentchattr-directory"]
+    queryKey: boardCompanyId
+      ? [...queryKeys.agents.listGlobal, boardCompanyId, scope, "agentchattr-directory"]
       : ["agents", "agentchattr-directory", "none"],
     queryFn: async () => {
-      if (!selectedCompanyId) return [] as AgentDirectoryEntry[];
+      if (!boardCompanyId) return [] as AgentDirectoryEntry[];
       try {
         return await agentsApi.listGlobal();
       } catch {
-        const agents = await agentsApi.list(selectedCompanyId);
+        const agents = await agentsApi.list(boardCompanyId);
         return agents.map((agent) => ({
           ...agent,
-          companyName: selectedCompany?.name ?? null,
+          companyName: boardCompany?.name ?? null,
         }));
       }
     },
-    enabled: !!selectedCompanyId,
+    enabled: !!boardCompanyId,
   });
 
   const enterpriseGraphQuery = useQuery({
-    queryKey: selectedCompanyId
-      ? [...queryKeys.enterpriseGraph(selectedCompanyId), "agentchattr"]
+    queryKey: boardCompanyId
+      ? [...queryKeys.enterpriseGraph(boardCompanyId, enterpriseScope), "agentchattr"]
       : ["enterprise-graph", "agentchattr", "none"],
     queryFn: async () => {
-      if (!selectedCompanyId) return null;
+      if (!boardCompanyId) return null;
       try {
-        return await agentsApi.enterpriseGraph(selectedCompanyId);
+        return await agentsApi.enterpriseGraph(boardCompanyId, enterpriseScope);
       } catch {
         return null;
       }
     },
-    enabled: !!selectedCompanyId,
+    enabled: !!boardCompanyId,
   });
 
   const agentMap = useMemo(() => {
@@ -97,15 +148,15 @@ export function AgentChatTR() {
     const linkedIds = new Set((enterpriseGraphQuery.data?.nodes ?? []).map((node) => node.id));
 
     for (const agent of directoryQuery.data ?? []) {
-      const isCompanyAgent = agent.companyId === selectedCompanyId;
+      const isCompanyAgent = agent.companyId === boardCompanyId;
       const isLinkedAgent = linkedIds.has(agent.id);
-      if (!isCompanyAgent && !isLinkedAgent) continue;
+      if (!isGlobalScope && !isCompanyAgent && !isLinkedAgent) continue;
       scoped.set(agent.id, {
         ...agent,
         companyName:
           agent.companyName ??
-          (agent.companyId === selectedCompanyId ? selectedCompany?.name ?? null : null),
-        linked: agent.companyId !== selectedCompanyId,
+          (agent.companyId === boardCompanyId ? boardCompany?.name ?? null : null),
+        linked: agent.companyId !== boardCompanyId,
       });
     }
 
@@ -119,19 +170,23 @@ export function AgentChatTR() {
         status: node.status,
         companyId: node.companyId ?? existing?.companyId,
         companyName: node.companyName ?? existing?.companyName ?? null,
-        linked: (node.companyId ?? existing?.companyId) !== selectedCompanyId,
+        linked: (node.companyId ?? existing?.companyId) !== boardCompanyId,
       });
     }
 
     return scoped;
-  }, [directoryQuery.data, enterpriseGraphQuery.data, selectedCompany?.name, selectedCompanyId]);
+  }, [boardCompany?.name, boardCompanyId, directoryQuery.data, enterpriseGraphQuery.data, isGlobalScope]);
 
   const scopedAgents = useMemo(() => {
     return Array.from(agentMap.values()).sort((left, right) => {
       if (left.linked !== right.linked) return left.linked ? 1 : -1;
+      if (isGlobalScope) {
+        const companyDelta = (left.companyName ?? "").localeCompare(right.companyName ?? "");
+        if (companyDelta !== 0) return companyDelta;
+      }
       return left.name.localeCompare(right.name);
     });
-  }, [agentMap]);
+  }, [agentMap, isGlobalScope]);
 
   const visibleAgents = useMemo(
     () => scopedAgents.filter((agent) => filterAgent(agent, search)),
@@ -139,12 +194,22 @@ export function AgentChatTR() {
   );
 
   const defaultAgentId = useMemo(() => {
+    if (isGlobalScope) {
+      const trustOwner = scopedAgents.reduce<{ agent: WorkspaceAgent | null; priority: number }>(
+        (best, agent) => {
+          const priority = trustOwnerPriority(agent, boardCompanyId);
+          return priority > best.priority ? { agent, priority } : best;
+        },
+        { agent: null, priority: 0 },
+      );
+      if (trustOwner.agent) return trustOwner.agent.id;
+    }
     const localRoot =
-      enterpriseGraphQuery.data?.roots.find((root) => root.companyId === selectedCompanyId)?.id ??
+      enterpriseGraphQuery.data?.roots.find((root) => root.companyId === boardCompanyId)?.id ??
       enterpriseGraphQuery.data?.roots[0]?.id ??
       null;
     return localRoot ?? scopedAgents[0]?.id ?? null;
-  }, [enterpriseGraphQuery.data?.roots, scopedAgents, selectedCompanyId]);
+  }, [boardCompanyId, enterpriseGraphQuery.data?.roots, isGlobalScope, scopedAgents]);
 
   useEffect(() => {
     if (!scopedAgents.length) {
@@ -156,7 +221,7 @@ export function AgentChatTR() {
   }, [agentMap, defaultAgentId, scopedAgents.length, selectedAgentId]);
 
   const selectedAgent = selectedAgentId ? agentMap.get(selectedAgentId) ?? null : null;
-  const selectedAgentCompanyId = selectedAgent?.companyId ?? selectedCompanyId ?? null;
+  const selectedAgentCompanyId = selectedAgent?.companyId ?? boardCompanyId ?? null;
   const reportsToName =
     (selectedAgent?.reportsTo ? agentMap.get(selectedAgent.reportsTo)?.name : null) ?? null;
 
@@ -225,7 +290,7 @@ export function AgentChatTR() {
     );
   }, [enterpriseGraphQuery.data?.links, selectedAgent]);
 
-  const currentDashboard = resolveCompanyDashboard(selectedCompany?.name, null);
+  const currentDashboard = resolveCompanyDashboard(boardCompany?.name, null);
   const executiveRoom = executiveRoomForDashboard(currentDashboard);
   const relayRoom = relayRoomForDashboard(currentDashboard);
 
@@ -233,15 +298,15 @@ export function AgentChatTR() {
     if (!selectedAgent) return "";
     return buildFallbackAgentChatroom({
       agentName: selectedAgent.name,
-      companyName: selectedAgent.companyName ?? selectedCompany?.name ?? null,
+      companyName: selectedAgent.companyName ?? boardCompany?.name ?? null,
       teamName: null,
       reportsToName,
       dashboard: resolveCompanyDashboard(
-        selectedAgent.companyName ?? selectedCompany?.name,
+        selectedAgent.companyName ?? boardCompany?.name,
         null,
       ),
     });
-  }, [reportsToName, selectedAgent, selectedCompany?.name]);
+  }, [boardCompany?.name, reportsToName, selectedAgent]);
 
   const chatroomContent = chatroomFileQuery.data?.content ?? fallbackChatroomContent;
   const parsedChatroom = useMemo(
@@ -252,7 +317,7 @@ export function AgentChatTR() {
     typeof parsedChatroom?.frontmatter.team === "string" ? parsedChatroom.frontmatter.team : null;
 
   const selectedDashboard = resolveCompanyDashboard(
-    selectedAgent?.companyName ?? selectedCompany?.name,
+    selectedAgent?.companyName ?? boardCompany?.name,
     typeof parsedChatroom?.frontmatter.dashboard === "string"
       ? parsedChatroom.frontmatter.dashboard
       : null,
@@ -262,8 +327,17 @@ export function AgentChatTR() {
     return <PageSkeleton variant="detail" />;
   }
 
-  if (!selectedCompanyId) {
-    return <EmptyState icon={MessageSquare} message="Select a company to open AgentChatTR." />;
+  if (!boardCompanyId) {
+    return (
+      <EmptyState
+        icon={MessageSquare}
+        message={
+          isGlobalScope
+            ? "Create a company before opening Global AgentChatTR."
+            : "Select a company to open Company AgentChatTR."
+        }
+      />
+    );
   }
 
   if (!scopedAgents.length) {
@@ -280,13 +354,17 @@ export function AgentChatTR() {
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight">AgentChatTR</h1>
-            <Badge variant="outline">{selectedCompany?.name ?? "Company board"}</Badge>
+            <h1 className="text-2xl font-semibold tracking-tight">
+              {isGlobalScope ? "Global AgentChatTR" : "Company AgentChatTR"}
+            </h1>
+            <Badge variant="outline">
+              {isGlobalScope ? "All visible companies" : boardCompany?.name ?? "Company board"}
+            </Badge>
           </div>
           <p className="max-w-3xl text-sm text-muted-foreground">
-            Live communication boards for the current company scope. This view uses each
-            agent&apos;s managed <code>CHATROOM.md</code> when it exists and falls back to a generated
-            board when it does not.
+            {isGlobalScope
+              ? "CEO/trust-owner command board across every visible agent. Open any agent's managed chatroom without losing company boundaries."
+              : "Live communication boards for the current company scope. This view uses each agent's managed CHATROOM.md when it exists and falls back to a generated board when it does not."}
           </p>
         </div>
         <div className="grid gap-2 sm:grid-cols-3">
@@ -295,9 +373,11 @@ export function AgentChatTR() {
             <div className="mt-1 text-sm font-medium">{currentDashboard}</div>
           </div>
           <div className="rounded-lg border border-border bg-card px-3 py-2">
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">Company Agents</div>
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">
+              {isGlobalScope ? "Visible Agents" : "Company Agents"}
+            </div>
             <div className="mt-1 text-sm font-medium">
-              {scopedAgents.filter((agent) => !agent.linked).length}
+              {isGlobalScope ? scopedAgents.length : scopedAgents.filter((agent) => !agent.linked).length}
             </div>
           </div>
           <div className="rounded-lg border border-border bg-card px-3 py-2">
@@ -314,7 +394,9 @@ export function AgentChatTR() {
               <div>
                 <h2 className="text-sm font-semibold">Agent Directory</h2>
                 <p className="text-xs text-muted-foreground">
-                  All current-company agents plus linked cross-company contacts in this board scope.
+                  {isGlobalScope
+                    ? "All visible agents across the enterprise, grouped by their real company."
+                    : "All current-company agents plus linked cross-company contacts in this board scope."}
                 </p>
               </div>
               <Badge variant="outline">{visibleAgents.length}</Badge>
@@ -410,7 +492,7 @@ export function AgentChatTR() {
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Button variant="outline" asChild>
-                      <Link to={agentUrl(selectedAgent)}>
+                      <Link to={agentCompanyHref(selectedAgent, companiesById)}>
                         Open Agent
                         <ArrowUpRight className="ml-1 h-4 w-4" />
                       </Link>

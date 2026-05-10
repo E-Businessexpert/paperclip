@@ -175,12 +175,32 @@ export function CompanyEnvironments() {
     ]);
   }, [selectedCompany?.name, setBreadcrumbs]);
 
-  const { data: experimentalSettings } = useQuery({
+  const experimentalSettingsQuery = useQuery({
     queryKey: queryKeys.instance.experimentalSettings,
     queryFn: () => instanceSettingsApi.getExperimental(),
     retry: false,
   });
+  const { data: experimentalSettings } = experimentalSettingsQuery;
   const environmentsEnabled = experimentalSettings?.enableEnvironments === true;
+
+  const enableEnvironmentsMutation = useMutation({
+    mutationFn: () => instanceSettingsApi.updateExperimental({ enableEnvironments: true }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.instance.experimentalSettings });
+      pushToast({
+        title: "Environments enabled",
+        body: "Company execution targets are now available for this instance.",
+        tone: "success",
+      });
+    },
+    onError: (error) => {
+      pushToast({
+        title: "Failed to enable environments",
+        body: error instanceof Error ? error.message : "Experimental settings update failed.",
+        tone: "error",
+      });
+    },
+  });
 
   const { data: environments } = useQuery({
     queryKey: selectedCompanyId ? queryKeys.environments.list(selectedCompanyId) : ["environments", "none"],
@@ -400,15 +420,72 @@ export function CompanyEnvironments() {
     return <div className="text-sm text-muted-foreground">Select a company to manage environments.</div>;
   }
 
-  if (!environmentsEnabled) {
+  if (experimentalSettingsQuery.isLoading) {
     return (
-      <div className="max-w-3xl space-y-4">
+      <div className="max-w-3xl space-y-4" data-testid="company-settings-environments-loading">
         <div className="flex items-center gap-2">
           <Settings className="h-5 w-5 text-muted-foreground" />
           <h1 className="text-lg font-semibold">Company Environments</h1>
         </div>
-        <div className="rounded-md border border-border px-4 py-4 text-sm text-muted-foreground">
-          Enable Environments in instance experimental settings to manage company execution targets.
+        <div className="rounded-md border border-border bg-card px-4 py-4 text-sm text-muted-foreground">
+          Checking whether execution environments are enabled for this instance...
+        </div>
+      </div>
+    );
+  }
+
+  if (experimentalSettingsQuery.isError) {
+    return (
+      <div className="max-w-3xl space-y-4" data-testid="company-settings-environments-error">
+        <div className="flex items-center gap-2">
+          <Settings className="h-5 w-5 text-muted-foreground" />
+          <h1 className="text-lg font-semibold">Company Environments</h1>
+        </div>
+        <div className="rounded-md border border-destructive/40 bg-destructive/5 px-4 py-4 text-sm">
+          <div className="font-medium text-foreground">Could not load environment settings.</div>
+          <p className="mt-1 text-muted-foreground">
+            Reload the settings flag before creating company execution targets.
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-3"
+            onClick={() => experimentalSettingsQuery.refetch()}
+          >
+            Retry
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!environmentsEnabled) {
+    return (
+      <div className="max-w-3xl space-y-4" data-testid="company-settings-environments-disabled">
+        <div className="flex items-center gap-2">
+          <Settings className="h-5 w-5 text-muted-foreground" />
+          <h1 className="text-lg font-semibold">Company Environments</h1>
+        </div>
+        <div className="rounded-md border border-border bg-card px-4 py-4">
+          <div className="text-sm font-medium text-foreground">Environments are off for this instance.</div>
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+            Enable Environments to manage SSH, local, and sandbox execution targets for {selectedCompany?.name ?? "this company"}.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button
+              type="button"
+              onClick={() => enableEnvironmentsMutation.mutate()}
+              disabled={enableEnvironmentsMutation.isPending}
+            >
+              {enableEnvironmentsMutation.isPending ? "Enabling..." : "Enable Environments"}
+            </Button>
+            <Button asChild variant="outline">
+              <a href="/instance/settings/experimental">
+                Open experimental settings
+              </a>
+            </Button>
+          </div>
         </div>
       </div>
     );

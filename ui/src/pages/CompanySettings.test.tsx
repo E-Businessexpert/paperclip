@@ -33,6 +33,7 @@ const mockEnvironmentsApi = vi.hoisted(() => ({
 
 const mockInstanceSettingsApi = vi.hoisted(() => ({
   getExperimental: vi.fn(),
+  updateExperimental: vi.fn(),
 }));
 
 const mockSecretsApi = vi.hoisted(() => ({
@@ -115,6 +116,9 @@ describe("CompanyEnvironments", () => {
     mockInstanceSettingsApi.getExperimental.mockResolvedValue({
       enableEnvironments: true,
     });
+    mockInstanceSettingsApi.updateExperimental.mockResolvedValue({
+      enableEnvironments: true,
+    });
     mockEnvironmentsApi.list.mockResolvedValue([]);
     mockEnvironmentsApi.capabilities.mockResolvedValue(
       getEnvironmentCapabilities(AGENT_ADAPTER_TYPES),
@@ -159,6 +163,45 @@ describe("CompanyEnvironments", () => {
     expect(optionLabels).not.toContain("Sandbox");
     expect(container.textContent).not.toContain("Fake sandbox");
     expect(container.textContent).not.toContain("Fake is the deterministic test provider");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("shows a direct enable action when environments are disabled", async () => {
+    const root = createRoot(container);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    mockInstanceSettingsApi.getExperimental.mockResolvedValue({
+      enableEnvironments: false,
+    });
+
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <TooltipProvider>
+            <CompanyEnvironments />
+          </TooltipProvider>
+        </QueryClientProvider>,
+      );
+    });
+    await flushReact();
+
+    expect(container.textContent).toContain("Environments are off for this instance.");
+    const enableButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.trim() === "Enable Environments");
+    expect(enableButton).toBeTruthy();
+
+    await act(async () => {
+      enableButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flushReact();
+
+    expect(mockInstanceSettingsApi.updateExperimental).toHaveBeenCalledWith({
+      enableEnvironments: true,
+    });
 
     await act(async () => {
       root.unmount();

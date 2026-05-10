@@ -201,6 +201,30 @@ export const BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES = [
     aiSemantics: "Coordinate external or internal communications with the target.",
     builtIn: true,
   },
+  {
+    key: "budgetFundedBy",
+    label: "Budget funded by",
+    description: "Legacy live-data alias for a funding source or finance lane.",
+    category: "finance",
+    aiSemantics: "Keep the target finance owner visible before changing budgets, owner-pay lanes, or distributions.",
+    builtIn: true,
+  },
+  {
+    key: "mustInform",
+    label: "Must inform",
+    description: "Legacy live-data alias for mandatory stakeholder visibility.",
+    category: "communication",
+    aiSemantics: "Notify the target agent before changes that affect their governance, finance, or operating context.",
+    builtIn: true,
+  },
+  {
+    key: "statusReportedTo",
+    label: "Status reported to",
+    description: "Legacy live-data alias for dotted-line status visibility.",
+    category: "communication",
+    aiSemantics: "Send status updates and escalation context to the target without replacing the formal reporting chain.",
+    builtIn: true,
+  },
 ] satisfies EnterpriseRelationshipTypeDefinition[];
 
 export const BUILTIN_ENTERPRISE_WORKFLOW_PACKS = [

@@ -16,6 +16,7 @@ import {
   MessageSquare,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { NavLink as RouterNavLink } from "react-router-dom";
 import { NavLink } from "@/lib/router";
 import { SidebarSection } from "./SidebarSection";
 import { SidebarNavItem } from "./SidebarNavItem";
@@ -66,9 +67,21 @@ export function Sidebar() {
           aria-label="Full Org Chart"
           title="Full Org Chart"
         >
-          <NavLink to="/full-structure">
+          <RouterNavLink to="/full-structure">
             <Workflow className="h-4 w-4" />
-          </NavLink>
+          </RouterNavLink>
+        </Button>
+        <Button
+          asChild
+          variant="ghost"
+          size="icon-sm"
+          className="text-muted-foreground shrink-0"
+          aria-label="Global AgentChatTR"
+          title="Global AgentChatTR"
+        >
+          <RouterNavLink to="/chatrooms">
+            <MessageSquare className="h-4 w-4" />
+          </RouterNavLink>
         </Button>
         <Button
           asChild
@@ -103,7 +116,7 @@ export function Sidebar() {
             badgeTone={inboxBadge.failedRuns > 0 ? "danger" : "default"}
             alert={inboxBadge.failedRuns > 0}
           />
-          <SidebarNavItem to="/chatrooms" label="AgentChatTR" icon={MessageSquare} />
+          <SidebarNavItem to="/chatrooms" label="Company AgentChatTR" icon={MessageSquare} />
           <PluginSlotOutlet
             slotTypes={["sidebar"]}
             context={pluginContext}

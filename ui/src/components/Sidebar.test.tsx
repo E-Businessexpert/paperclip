@@ -157,19 +157,21 @@ describe("Sidebar", () => {
     vi.clearAllMocks();
   });
 
-  it("keeps the global full org icon separate from AgentChatTR", async () => {
+  it("keeps global full org and AgentChatTR icons separate from the company chatroom link", async () => {
     mockInstanceSettingsApi.getExperimental.mockResolvedValue({ enableIsolatedWorkspaces: false });
     const root = await renderSidebar();
 
     const fullOrgLink = container.querySelector('a[aria-label="Full Org Chart"]');
-    expect(fullOrgLink?.getAttribute("href")).toBe("/PAP/full-structure");
-    expect(container.textContent).toContain("AgentChatTR");
+    expect(fullOrgLink?.getAttribute("href")).toBe("/full-structure");
+    const globalAgentChatTRLink = container.querySelector('a[aria-label="Global AgentChatTR"]');
+    expect(globalAgentChatTRLink?.getAttribute("href")).toBe("/chatrooms");
+    expect(container.textContent).toContain("Company AgentChatTR");
     const fullOrgTextLink = [...container.querySelectorAll("a")].find(
       (anchor) => anchor.textContent?.trim() === "Full Org Chart",
     );
     expect(fullOrgTextLink).toBeUndefined();
     const agentChatTRLink = [...container.querySelectorAll("a")].find(
-      (anchor) => anchor.textContent?.trim() === "AgentChatTR",
+      (anchor) => anchor.textContent?.trim() === "Company AgentChatTR",
     );
     expect(agentChatTRLink?.getAttribute("href")).toBe("/PAP/chatrooms");
 

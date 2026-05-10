@@ -28,15 +28,20 @@ git rev-list --left-right --count HEAD...userfork/master
 
 - The full organization view supports both `/full-structure` and company-scoped routes like `/FAM/full-structure`.
 - The full organization UI must preserve the pre-upstream-merge enterprise chart experience from commit `956a811c`: compact sticky top filters, color key, wheel zoom, expand/collapse controls, graph fullscreen, and minimized Wiring Inspector.
-- `AgentChatTR` is a separate feature at `/chatrooms`; do not use it as a container for the full organization chart.
-- The sidebar should expose `Full Org Chart` and `AgentChatTR` as separate links/functions.
-- The full organization icon belongs in the universal sidebar top bar and may link to the global `/full-structure` route.
+- `AgentChatTR` is a separate feature; do not use it as a container for the full organization chart.
+- The global AgentChatTR route is `/chatrooms` and is for CEO/trust-owner communication across every visible agent.
+- The company AgentChatTR route is `/:companyPrefix/chatrooms` and must stay scoped to the selected company's agents plus explicitly linked cross-company contacts.
+- The sidebar should expose `Full Org Chart`, `Global AgentChatTR`, and company `AgentChatTR` as separate links/functions.
+- The full organization icon belongs in the universal sidebar top bar and must link to the global `/full-structure` route.
+- The global AgentChatTR icon belongs in the same universal sidebar top bar and must link to the global `/chatrooms` route.
 - Company-prefixed `/FAM/full-structure` links must render the full-structure page in the company context; do not redirect them away to the global route.
 - Do not add `/chatrooms` as a fake container for the full organization link.
-- Do not turn `AgentChatTR` into a page that dumps every agent; it is a lightweight sidebar section for the full-org entry point unless a dedicated chatroom feature is restored intentionally.
+- Do not make company `AgentChatTR` dump every agent; only the global `/chatrooms` route may list every visible company agent.
 - Keep upstream's native company `OrgChart` page separate from the custom enterprise `FullStructure` page.
 - Preserve enterprise relationship metadata and permission fields in shared/server agent types.
+- Preserve legacy live enterprise relationship keys `budgetFundedBy`, `mustInform`, and `statusReportedTo`; they are still present in live metadata and must remain resolvable after upstream taxonomy updates.
 - Preserve database migration compatibility for previously-applied local migrations when upstream renumbers or replaces migration files.
+- Preserve the live portable export at `C:\Users\savem\Documents\New project\paperclip-live-export` as the restore source for company packages, agent instructions, `.paperclip.yaml` metadata, permissions, service-discovery cache, and relationship links.
 
 ## Previous Issues And Fixes
 
@@ -46,6 +51,14 @@ git rev-list --left-right --count HEAD...userfork/master
   Fix: keep the raw React Router icon link to `/full-structure` in the sidebar top bar, expose a separate prefix-aware `Full Org Chart` link, and keep `AgentChatTR` as its own `/chatrooms` link.
 - Issue: full organization chart UI was replaced with the wrong standalone corporation map and was mixed into the `AgentChatTR` sidebar section.
   Fix: restore the old `956a811c` enterprise org-chart UI as the full-structure page, keep upstream's native company `OrgChart` separate, and restore `AgentChatTR` as `/chatrooms`.
+- Issue: `/chatrooms` redirected into the selected company, so there was no true global CEO/trust-owner chat board.
+  Fix: route `/chatrooms` to `AgentChatTR scope="global"` and route `/:companyPrefix/chatrooms` to `AgentChatTR scope="company"`.
+- Issue: Company Environments looked blank when the experimental flag was disabled.
+  Fix: render explicit loading/error/disabled states and provide a direct "Enable Environments" action from the company environments page.
+- Issue: data customizations appeared to vanish after an upstream merge.
+  Fix: audit the code first, then restore data from `paperclip-live-export` or a timestamped `paperclip-live-snapshots` backup instead of recreating permissions and relationships by hand.
+- Issue: live relationship metadata existed but the graph returned zero secondary relationship links because upstream only recognized new snake_case relationship keys.
+  Fix: keep compatibility aliases for the live camelCase keys in `packages/shared/src/types/agent.ts`.
 - Issue: native upstream org-chart code was overwritten by the custom enterprise graph.
   Fix: keep `ui/src/pages/OrgChart.tsx` as upstream's company chart and keep `ui/src/pages/FullStructure.tsx` as the custom enterprise graph.
 - Issue: deployment recovery could restart an old image after reboot.
@@ -65,7 +78,7 @@ pnpm --filter @paperclipai/shared typecheck
 pnpm --filter @paperclipai/db typecheck
 pnpm --filter @paperclipai/server typecheck
 pnpm --filter @paperclipai/ui build
-pnpm exec vitest run --project @paperclipai/ui ui/src/components/Sidebar.test.tsx ui/src/lib/company-routes.test.ts ui/src/pages/FullStructure.test.ts --reporter=verbose
+pnpm exec vitest run --project @paperclipai/ui ui/src/components/Sidebar.test.tsx ui/src/lib/company-routes.test.ts ui/src/pages/FullStructure.test.ts ui/src/pages/FullStructurePage.test.ts ui/src/pages/AgentChatTR.test.tsx ui/src/pages/CompanySettings.test.tsx --reporter=verbose
 ```
 
 Expected route/link behavior:
@@ -73,6 +86,8 @@ Expected route/link behavior:
 - `/full-structure` renders the global full organization chart.
 - `/:companyPrefix/full-structure` renders the full-structure page in company context and scopes the graph to that connected company graph.
 - The sidebar full-org icon href is `/full-structure`.
-- The sidebar contains separate `Full Org Chart` and `AgentChatTR` links.
-- `AgentChatTR` resolves to the company-scoped `/chatrooms` board route.
+- The sidebar global AgentChatTR icon href is `/chatrooms`.
+- The sidebar contains separate full-org, global AgentChatTR, and company AgentChatTR links.
+- `/chatrooms` resolves to global AgentChatTR and seeds the family/trust company when available.
+- `/:companyPrefix/chatrooms` resolves to the company-scoped AgentChatTR board route.
 - The sidebar does not place the full organization chart inside the `AgentChatTR` section.

@@ -80,7 +80,7 @@ function boardRoutes() {
       <Route path="plugins/:pluginId" element={<PluginPage />} />
       <Route path="org" element={<OrgChart />} />
       <Route path="full-structure" element={<FullStructurePage />} />
-      <Route path="chatrooms" element={<AgentChatTR />} />
+      <Route path="chatrooms" element={<AgentChatTR scope="company" />} />
       <Route path="agents" element={<Navigate to="/agents/all" replace />} />
       <Route path="agents/all" element={<Agents />} />
       <Route path="agents/active" element={<Agents />} />
@@ -323,7 +323,7 @@ export function App() {
           <Route path="settings" element={<LegacySettingsRedirect />} />
           <Route path="settings/*" element={<LegacySettingsRedirect />} />
           <Route path="full-structure" element={<FullStructurePage />} />
-          <Route path="chatrooms" element={<UnprefixedBoardRedirect />} />
+          <Route path="chatrooms" element={<AgentChatTR scope="global" />} />
           <Route path="agents" element={<UnprefixedBoardRedirect />} />
           <Route path="agents/new" element={<UnprefixedBoardRedirect />} />
           <Route path="agents/:agentId" element={<UnprefixedBoardRedirect />} />
