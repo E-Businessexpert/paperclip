@@ -41,6 +41,7 @@ git rev-list --left-right --count HEAD...userfork/master
 - Keep upstream's native company `OrgChart` page separate from the custom enterprise `FullStructure` page.
 - Preserve enterprise relationship metadata and permission fields in shared/server agent types.
 - Preserve legacy live enterprise relationship keys `budgetFundedBy`, `mustInform`, and `statusReportedTo`; they are still present in live metadata and must remain resolvable after upstream taxonomy updates.
+- Preserve the agent detail `Agent Permissions` page and dashboard context panels: they must expose relationship workspace editing, cross-company target search, expanded permission toggles, service discovery/software assignments, adapter config, runtime config, and redacted metadata.
 - Preserve database migration compatibility for previously-applied local migrations when upstream renumbers or replaces migration files.
 - Preserve the live portable export at `C:\Users\savem\Documents\New project\paperclip-live-export` as the restore source for company packages, agent instructions, `.paperclip.yaml` metadata, permissions, service-discovery cache, and relationship links.
 
@@ -60,6 +61,8 @@ git rev-list --left-right --count HEAD...userfork/master
   Fix: audit the code first, then restore data from `paperclip-live-export` or a timestamped `paperclip-live-snapshots` backup instead of recreating permissions and relationships by hand.
 - Issue: live relationship metadata existed but the graph returned zero secondary relationship links because upstream only recognized new snake_case relationship keys.
   Fix: keep compatibility aliases for the live camelCase keys in `packages/shared/src/types/agent.ts`.
+- Issue: the upstream merge kept relationship data on the API but removed the visible agent detail controls and type contract, making the agent dashboard look like relationships, metadata, service discovery, and advanced permissions had disappeared.
+  Fix: keep `AgentDetail.enterpriseRelationships` in the shared type, keep the `Agent Permissions` tab, and run `ui/src/pages/AgentDetailEnterprise.test.tsx` with each upstream merge.
 - Issue: native upstream org-chart code was overwritten by the custom enterprise graph.
   Fix: keep `ui/src/pages/OrgChart.tsx` as upstream's company chart and keep `ui/src/pages/FullStructure.tsx` as the custom enterprise graph.
 - Issue: deployment recovery could restart an old image after reboot.
@@ -83,7 +86,7 @@ pnpm --filter @paperclipai/shared typecheck
 pnpm --filter @paperclipai/db typecheck
 pnpm --filter @paperclipai/server typecheck
 pnpm --filter @paperclipai/ui build
-pnpm exec vitest run --project @paperclipai/ui ui/src/components/Sidebar.test.tsx ui/src/lib/company-routes.test.ts ui/src/pages/FullStructure.test.ts ui/src/pages/FullStructurePage.test.ts ui/src/pages/AgentChatTR.test.tsx ui/src/pages/CompanySettings.test.tsx --reporter=verbose
+pnpm exec vitest run --project @paperclipai/ui ui/src/components/Sidebar.test.tsx ui/src/lib/company-routes.test.ts ui/src/pages/FullStructure.test.ts ui/src/pages/FullStructurePage.test.ts ui/src/pages/AgentChatTR.test.tsx ui/src/pages/AgentDetailEnterprise.test.tsx ui/src/pages/CompanySettings.test.tsx --reporter=verbose
 ```
 
 Expected route/link behavior:

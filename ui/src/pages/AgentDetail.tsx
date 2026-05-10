@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   agentsApi,
   type AgentKey,
+  type AgentDirectoryEntry,
   type ClaudeLoginResult,
   type AgentPermissionUpdate,
 } from "../api/agents";
@@ -82,11 +83,17 @@ import { AgentIcon, AgentIconPicker } from "../components/AgentIconPicker";
 import { RunTranscriptView, type TranscriptMode } from "../components/transcript/RunTranscriptView";
 import {
   isUuidLike,
+  BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES,
+  BUILTIN_ENTERPRISE_WORKFLOW_PACKS,
+  resolveEnterpriseRelationshipTypes,
   type Agent,
+  type AgentEnterpriseRelationshipsRecord,
+  type AgentEnterpriseRelationshipsView,
   type AgentSkillEntry,
   type AgentSkillSnapshot,
   type AgentDetail as AgentDetailRecord,
   type BudgetPolicySummary,
+  type EnterpriseRelationshipCategory,
   type HeartbeatRun,
   type HeartbeatRunEvent,
   type AgentRuntimeState,
@@ -235,10 +242,18 @@ function scrollToContainerBottom(container: ScrollContainer, behavior: ScrollBeh
   container.scrollTo({ top: container.scrollHeight, behavior });
 }
 
-type AgentDetailView = "dashboard" | "instructions" | "configuration" | "skills" | "runs" | "budget";
+type AgentDetailView =
+  | "dashboard"
+  | "instructions"
+  | "permissions"
+  | "configuration"
+  | "skills"
+  | "runs"
+  | "budget";
 
 function parseAgentDetailView(value: string | null): AgentDetailView {
   if (value === "instructions" || value === "prompts") return "instructions";
+  if (value === "permissions" || value === "agent-permissions") return "permissions";
   if (value === "configure" || value === "configuration") return "configuration";
   if (value === "skills") return "skills";
   if (value === "budget") return "budget";
@@ -643,6 +658,7 @@ export function AgentDetail() {
   const activeView = urlRunId ? "runs" as AgentDetailView : parseAgentDetailView(urlTab ?? null);
   const needsDashboardData = activeView === "dashboard";
   const needsRunData = activeView === "runs" || Boolean(urlRunId);
+  const needsVisibleAgentDirectory = needsDashboardData || activeView === "permissions";
   const shouldLoadHeartbeats = needsDashboardData || needsRunData;
   const [configDirty, setConfigDirty] = useState(false);
   const [configSaving, setConfigSaving] = useState(false);
@@ -667,6 +683,11 @@ export function AgentDetail() {
   });
   const resolvedCompanyId = agent?.companyId ?? selectedCompanyId;
   const canonicalAgentRef = agent ? agentRouteRef(agent) : routeAgentRef;
+  const canonicalCompanyPrefix = useMemo(() => {
+    if (!agent?.companyId) return null;
+    const company = companies.find((entry) => entry.id === agent.companyId);
+    return company?.issuePrefix?.toUpperCase() ?? null;
+  }, [agent?.companyId, companies]);
   const agentLookupRef = agent?.id ?? routeAgentRef;
   const resolvedAgentId = agent?.id ?? null;
 
@@ -688,10 +709,18 @@ export function AgentDetail() {
     enabled: !!resolvedCompanyId && !!resolvedAgentId && needsDashboardData,
   });
 
-  const { data: allAgents } = useQuery({
-    queryKey: queryKeys.agents.list(resolvedCompanyId!),
-    queryFn: () => agentsApi.list(resolvedCompanyId!),
-    enabled: !!resolvedCompanyId && needsDashboardData,
+  const { data: visibleAgents = [] } = useQuery<AgentDirectoryEntry[]>({
+    queryKey: resolvedCompanyId
+      ? [...queryKeys.agents.listGlobal, resolvedCompanyId, "agent-detail-relations"]
+      : ["agents", "none", "agent-detail-relations"],
+    queryFn: async () => {
+      try {
+        return await agentsApi.listGlobal();
+      } catch {
+        return resolvedCompanyId ? await agentsApi.list(resolvedCompanyId) : [];
+      }
+    },
+    enabled: !!resolvedCompanyId && needsVisibleAgentDirectory,
   });
 
   const { data: budgetOverview } = useQuery({
@@ -704,8 +733,8 @@ export function AgentDetail() {
 
   const assignedIssues = (allIssues ?? [])
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-  const reportsToAgent = (allAgents ?? []).find((a) => a.id === agent?.reportsTo);
-  const directReports = (allAgents ?? []).filter((a) => a.reportsTo === agent?.id && a.status !== "terminated");
+  const reportsToAgent = visibleAgents.find((a) => a.id === agent?.reportsTo);
+  const directReports = visibleAgents.filter((a) => a.reportsTo === agent?.id && a.status !== "terminated");
   const agentBudgetSummary = useMemo(() => {
     const matched = budgetOverview?.policies.find(
       (policy) => policy.scopeType === "agent" && policy.scopeId === (agent?.id ?? routeAgentRef),
@@ -744,15 +773,23 @@ export function AgentDetail() {
 
   useEffect(() => {
     if (!agent) return;
+    const currentCompanyPrefix = companyPrefix?.toUpperCase() ?? null;
+    const needsCompanyPrefixRewrite =
+      Boolean(canonicalCompanyPrefix) && canonicalCompanyPrefix !== currentCompanyPrefix;
     if (urlRunId) {
-      if (routeAgentRef !== canonicalAgentRef) {
-        navigate(`/agents/${canonicalAgentRef}/runs/${urlRunId}`, { replace: true });
+      if (routeAgentRef !== canonicalAgentRef || needsCompanyPrefixRewrite) {
+        const targetPath = canonicalCompanyPrefix
+          ? `/${canonicalCompanyPrefix}/agents/${canonicalAgentRef}/runs/${urlRunId}`
+          : `/agents/${canonicalAgentRef}/runs/${urlRunId}`;
+        navigate(targetPath, { replace: true });
       }
       return;
     }
     const canonicalTab =
       activeView === "instructions"
         ? "instructions"
+        : activeView === "permissions"
+          ? "permissions"
         : activeView === "configuration"
           ? "configuration"
           : activeView === "skills"
@@ -762,11 +799,24 @@ export function AgentDetail() {
               : activeView === "budget"
                 ? "budget"
               : "dashboard";
-    if (routeAgentRef !== canonicalAgentRef || urlTab !== canonicalTab) {
-      navigate(`/agents/${canonicalAgentRef}/${canonicalTab}`, { replace: true });
+    if (routeAgentRef !== canonicalAgentRef || urlTab !== canonicalTab || needsCompanyPrefixRewrite) {
+      const targetPath = canonicalCompanyPrefix
+        ? `/${canonicalCompanyPrefix}/agents/${canonicalAgentRef}/${canonicalTab}`
+        : `/agents/${canonicalAgentRef}/${canonicalTab}`;
+      navigate(targetPath, { replace: true });
       return;
     }
-  }, [agent, routeAgentRef, canonicalAgentRef, urlRunId, urlTab, activeView, navigate]);
+  }, [
+    activeView,
+    agent,
+    canonicalAgentRef,
+    canonicalCompanyPrefix,
+    companyPrefix,
+    navigate,
+    routeAgentRef,
+    urlRunId,
+    urlTab,
+  ]);
 
   useEffect(() => {
     if (!agent?.companyId || agent.companyId === selectedCompanyId) return;
@@ -788,6 +838,7 @@ export function AgentDetail() {
       setActionError(null);
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(routeAgentRef) });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agentLookupRef) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.listGlobal });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.runtimeState(agentLookupRef) });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.taskSessions(agentLookupRef) });
       if (resolvedCompanyId) {
@@ -818,6 +869,7 @@ export function AgentDetail() {
       queryClient.invalidateQueries({ queryKey: queryKeys.budgets.overview(resolvedCompanyId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(routeAgentRef) });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agentLookupRef) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.listGlobal });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(resolvedCompanyId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboard(resolvedCompanyId) });
     },
@@ -828,6 +880,7 @@ export function AgentDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(routeAgentRef) });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agentLookupRef) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.listGlobal });
       if (resolvedCompanyId) {
         queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(resolvedCompanyId) });
       }
@@ -854,6 +907,7 @@ export function AgentDetail() {
       setActionError(null);
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(routeAgentRef) });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agentLookupRef) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.listGlobal });
       if (resolvedCompanyId) {
         queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(resolvedCompanyId) });
       }
@@ -877,6 +931,8 @@ export function AgentDetail() {
         crumbs.push({ label: `Run ${urlRunId.slice(0, 8)}` });
       } else if (activeView === "instructions") {
         crumbs.push({ label: "Instructions" });
+      } else if (activeView === "permissions") {
+        crumbs.push({ label: "Agent Permissions" });
       } else if (activeView === "configuration") {
         crumbs.push({ label: "Configuration" });
       // } else if (activeView === "skills") { // TODO: bring back later
@@ -1022,6 +1078,7 @@ export function AgentDetail() {
               { value: "dashboard", label: "Dashboard" },
               { value: "instructions", label: "Instructions" },
               { value: "skills", label: "Skills" },
+              { value: "permissions", label: "Agent Permissions" },
               { value: "configuration", label: "Configuration" },
               { value: "runs", label: "Runs" },
               { value: "budget", label: "Budget" },
@@ -1106,6 +1163,9 @@ export function AgentDetail() {
           runtimeState={runtimeState}
           agentId={agent.id}
           agentRouteId={canonicalAgentRef}
+          reportsToAgent={reportsToAgent ?? null}
+          directReports={directReports}
+          visibleAgents={visibleAgents}
         />
       )}
 
@@ -1129,6 +1189,15 @@ export function AgentDetail() {
           onSaveActionChange={setSaveConfigAction}
           onCancelActionChange={setCancelConfigAction}
           onSavingChange={setConfigSaving}
+          updatePermissions={updatePermissions}
+        />
+      )}
+
+      {activeView === "permissions" && (
+        <AgentPermissionsPage
+          agent={agent}
+          companyId={resolvedCompanyId ?? undefined}
+          visibleAgents={visibleAgents}
           updatePermissions={updatePermissions}
         />
       )}
@@ -1264,6 +1333,113 @@ function LatestRunCard({ runs, agentId }: { runs: HeartbeatRun[]; agentId: strin
   );
 }
 
+function EnterpriseDashboardContext({
+  agent,
+  reportsToAgent,
+  directReports,
+  visibleAgents,
+}: {
+  agent: AgentDetailRecord;
+  reportsToAgent: AgentDirectoryEntry | null;
+  directReports: AgentDirectoryEntry[];
+  visibleAgents: AgentDirectoryEntry[];
+}) {
+  const targetById = useMemo(
+    () => new Map(visibleAgents.map((entry) => [entry.id, entry])),
+    [visibleAgents],
+  );
+  const relationshipLinks = agent.enterpriseRelationships?.links ?? [];
+  const serviceCount = agent.metadata?.serviceDiscoveryCache?.services.length ?? 0;
+  const enabledPermissions = [
+    agent.permissions?.canCreateAgents ? "Create agents" : null,
+    agent.access?.canAssignTasks ? "Assign tasks" : null,
+    agent.permissions?.canDesignOrganizations ? "Design orgs" : null,
+    agent.permissions?.canManageRelationshipTypes ? "Relationship types" : null,
+    agent.permissions?.canManageServiceDiscovery ? "Service discovery" : null,
+    agent.permissions?.canManageDeploymentAssignments ? "Deployment assignments" : null,
+    agent.permissions?.canGenerateSystemTopology ? "System topology" : null,
+  ].filter((value): value is string => Boolean(value));
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-3">
+      <div className="rounded-lg border border-border p-4">
+        <h3 className="text-sm font-medium">Hierarchy</h3>
+        <div className="mt-3 space-y-2 text-sm">
+          <SummaryRow label="Reports to">
+            <span className="text-xs">{reportsToAgent?.name ?? agent.reportsTo ?? "None"}</span>
+          </SummaryRow>
+          <SummaryRow label="Direct reports">
+            <span className="text-xs">{directReports.length}</span>
+          </SummaryRow>
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {directReports.slice(0, 6).map((report) => (
+              <span key={report.id} className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+                {report.name}
+              </span>
+            ))}
+            {directReports.length > 6 ? (
+              <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+                +{directReports.length - 6} more
+              </span>
+            ) : null}
+          </div>
+        </div>
+      </div>
+      <div className="rounded-lg border border-border p-4">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-sm font-medium">Relationship Links</h3>
+          <Link to={`/agents/${agentRouteRef(agent)}/permissions`} className="text-xs text-muted-foreground hover:text-foreground">
+            Manage
+          </Link>
+        </div>
+        {relationshipLinks.length === 0 ? (
+          <p className="mt-3 text-sm text-muted-foreground">No secondary links configured.</p>
+        ) : (
+          <div className="mt-3 space-y-2">
+            {relationshipLinks.slice(0, 5).map((link) => {
+              const target = targetById.get(link.targetAgentId);
+              return (
+                <div key={link.id} className="rounded-md border border-border/70 p-2 text-xs">
+                  <div className="font-medium">{link.typeLabel}</div>
+                  <div className="text-muted-foreground">
+                    {target?.companyName ? `${target.companyName} - ` : ""}
+                    {target?.name ?? link.targetAgentId}
+                  </div>
+                </div>
+              );
+            })}
+            {relationshipLinks.length > 5 ? (
+              <p className="text-xs text-muted-foreground">+{relationshipLinks.length - 5} more links</p>
+            ) : null}
+          </div>
+        )}
+      </div>
+      <div className="rounded-lg border border-border p-4">
+        <h3 className="text-sm font-medium">Access & Discovery</h3>
+        <div className="mt-3 space-y-3">
+          <SummaryRow label="Enabled permissions">
+            <span className="text-xs">{enabledPermissions.length}</span>
+          </SummaryRow>
+          <SummaryRow label="Discovered services">
+            <span className="text-xs">{serviceCount}</span>
+          </SummaryRow>
+          <div className="flex flex-wrap gap-1.5">
+            {enabledPermissions.length === 0 ? (
+              <span className="text-xs text-muted-foreground">No elevated permissions.</span>
+            ) : (
+              enabledPermissions.map((permission) => (
+                <span key={permission} className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+                  {permission}
+                </span>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---- Agent Overview (main single-page view) ---- */
 
 function AgentOverview({
@@ -1273,6 +1449,9 @@ function AgentOverview({
   runtimeState,
   agentId,
   agentRouteId,
+  reportsToAgent,
+  directReports,
+  visibleAgents,
 }: {
   agent: AgentDetailRecord;
   runs: HeartbeatRun[];
@@ -1280,11 +1459,21 @@ function AgentOverview({
   runtimeState?: AgentRuntimeState;
   agentId: string;
   agentRouteId: string;
+  reportsToAgent: AgentDirectoryEntry | null;
+  directReports: AgentDirectoryEntry[];
+  visibleAgents: AgentDirectoryEntry[];
 }) {
   return (
     <div className="space-y-8">
       {/* Latest Run */}
       <LatestRunCard runs={runs} agentId={agentRouteId} />
+
+      <EnterpriseDashboardContext
+        agent={agent}
+        reportsToAgent={reportsToAgent}
+        directReports={directReports}
+        visibleAgents={visibleAgents}
+      />
 
       {/* Charts */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1528,6 +1717,1016 @@ function AgentConfigurePage({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+const enterpriseRelationshipCategoryOptions: Array<{
+  value: EnterpriseRelationshipCategory;
+  label: string;
+}> = [
+  { value: "matrix", label: "Matrix" },
+  { value: "delivery", label: "Delivery" },
+  { value: "decision", label: "Decision" },
+  { value: "service", label: "Service" },
+  { value: "asset", label: "Asset" },
+  { value: "data", label: "Data" },
+  { value: "governance", label: "Governance" },
+  { value: "finance", label: "Finance" },
+  { value: "communication", label: "Communication" },
+  { value: "custom", label: "Custom" },
+];
+
+function createRelationshipId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `rel_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function buildEnterpriseRelationshipsDraft(
+  view: AgentEnterpriseRelationshipsView | null | undefined,
+): AgentEnterpriseRelationshipsRecord {
+  return {
+    version: 1,
+    updatedAt: view?.updatedAt ?? null,
+    customTypes: (view?.customTypes ?? []).map((customType) => ({ ...customType })),
+    links: (view?.links ?? []).map((link) => ({
+      id: link.id,
+      typeKey: link.typeKey,
+      targetAgentId: link.targetAgentId,
+      notes: link.notes ?? null,
+    })),
+  };
+}
+
+function enterpriseRelationshipsEqual(
+  left: AgentEnterpriseRelationshipsRecord,
+  right: AgentEnterpriseRelationshipsRecord,
+) {
+  return JSON.stringify({
+    customTypes: left.customTypes,
+    links: left.links,
+  }) === JSON.stringify({
+    customTypes: right.customTypes,
+    links: right.links,
+  });
+}
+
+function redactStructuredValue(key: string, value: unknown): unknown {
+  if (shouldRedactSecretValue(key, value)) return REDACTED_ENV_VALUE;
+  if (typeof value === "string") return redactPathText(value, false);
+  if (Array.isArray(value)) {
+    return value.map((entry, index) => redactStructuredValue(`${key}.${index}`, entry));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([childKey, childValue]) => [
+        childKey,
+        redactStructuredValue(childKey, childValue),
+      ]),
+    );
+  }
+  return value;
+}
+
+function formatStructuredValue(key: string, value: unknown): string {
+  const redacted = redactStructuredValue(key, value);
+  if (redacted === null || redacted === undefined) return "";
+  if (typeof redacted === "string") return redacted;
+  if (typeof redacted === "number" || typeof redacted === "boolean") return String(redacted);
+  try {
+    return JSON.stringify(redacted, null, 2);
+  } catch {
+    return String(redacted);
+  }
+}
+
+function AgentPermissionsPage({
+  agent,
+  companyId,
+  visibleAgents,
+  updatePermissions,
+}: {
+  agent: AgentDetailRecord;
+  companyId?: string;
+  visibleAgents: AgentDirectoryEntry[];
+  updatePermissions: { mutate: (permissions: AgentPermissionUpdate) => void; isPending: boolean };
+}) {
+  const queryClient = useQueryClient();
+  const { pushToast } = useToastActions();
+  const relationshipBaseline = useMemo(
+    () => buildEnterpriseRelationshipsDraft(agent.enterpriseRelationships),
+    [agent.enterpriseRelationships],
+  );
+  const [relationshipDraft, setRelationshipDraft] = useState<AgentEnterpriseRelationshipsRecord>(
+    relationshipBaseline,
+  );
+  const [relationshipTargetSearch, setRelationshipTargetSearch] = useState("");
+  const [quickStartTypeKey, setQuickStartTypeKey] = useState(
+    BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES[0]?.key ?? "",
+  );
+  const [quickStartTargetId, setQuickStartTargetId] = useState("");
+  const [customTypesOpen, setCustomTypesOpen] = useState(
+    Boolean(relationshipBaseline.customTypes.length),
+  );
+
+  useEffect(() => {
+    setRelationshipDraft(relationshipBaseline);
+  }, [relationshipBaseline]);
+
+  useEffect(() => {
+    setRelationshipTargetSearch("");
+    setQuickStartTypeKey(BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES[0]?.key ?? "");
+    setQuickStartTargetId("");
+    setCustomTypesOpen(Boolean(relationshipBaseline.customTypes.length));
+  }, [agent.id, relationshipBaseline.customTypes.length]);
+
+  useEffect(() => {
+    if (relationshipDraft.customTypes.length > 0) setCustomTypesOpen(true);
+  }, [relationshipDraft.customTypes.length]);
+
+  const relationshipTargets = useMemo(
+    () =>
+      [...visibleAgents]
+        .filter((candidate) => candidate.id !== agent.id && candidate.status !== "terminated")
+        .sort((left, right) => {
+          const companyOrder = (left.companyName ?? "").localeCompare(right.companyName ?? "");
+          if (companyOrder !== 0) return companyOrder;
+          return left.name.localeCompare(right.name);
+        }),
+    [agent.id, visibleAgents],
+  );
+  const filteredRelationshipTargets = useMemo(() => {
+    const needle = relationshipTargetSearch.trim().toLowerCase();
+    if (!needle) return relationshipTargets;
+    return relationshipTargets.filter((candidate) =>
+      [
+        candidate.name,
+        candidate.companyName ?? "",
+        candidate.title ?? "",
+        candidate.role,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [relationshipTargetSearch, relationshipTargets]);
+  const relationshipTargetById = useMemo(
+    () => new Map(relationshipTargets.map((candidate) => [candidate.id, candidate])),
+    [relationshipTargets],
+  );
+  const relationshipTargetGroups = useMemo(() => {
+    const groups = new Map<string, AgentDirectoryEntry[]>();
+    for (const candidate of filteredRelationshipTargets) {
+      const key = candidate.companyName?.trim() || "Other agents";
+      const existing = groups.get(key);
+      if (existing) {
+        existing.push(candidate);
+      } else {
+        groups.set(key, [candidate]);
+      }
+    }
+    return [...groups.entries()];
+  }, [filteredRelationshipTargets]);
+  const liveRelationshipSearchResults = useMemo(
+    () => filteredRelationshipTargets.slice(0, 8),
+    [filteredRelationshipTargets],
+  );
+  const availableRelationshipTypes = useMemo(
+    () => resolveEnterpriseRelationshipTypes(relationshipDraft.customTypes),
+    [relationshipDraft.customTypes],
+  );
+  const relationshipTypeByKey = useMemo(
+    () => new Map(availableRelationshipTypes.map((definition) => [definition.key, definition])),
+    [availableRelationshipTypes],
+  );
+  const availableRelationshipTypeGroups = useMemo(
+    () =>
+      enterpriseRelationshipCategoryOptions
+        .map((option) => ({
+          ...option,
+          definitions: availableRelationshipTypes.filter(
+            (definition) => definition.category === option.value,
+          ),
+        }))
+        .filter((group) => group.definitions.length > 0),
+    [availableRelationshipTypes],
+  );
+  const selectedQuickStartType =
+    (quickStartTypeKey ? relationshipTypeByKey.get(quickStartTypeKey) : null) ??
+    availableRelationshipTypes[0] ??
+    null;
+  const selectedQuickStartTarget =
+    (quickStartTargetId ? relationshipTargetById.get(quickStartTargetId) : null) ??
+    filteredRelationshipTargets[0] ??
+    relationshipTargets[0] ??
+    null;
+  const builtinRelationshipTypeKeys = useMemo(
+    () => new Set(BUILTIN_ENTERPRISE_RELATIONSHIP_TYPES.map((definition) => definition.key)),
+    [],
+  );
+  const relationshipsDirty = useMemo(
+    () => !enterpriseRelationshipsEqual(relationshipDraft, relationshipBaseline),
+    [relationshipDraft, relationshipBaseline],
+  );
+  const relationshipValidationError = useMemo(() => {
+    const seenCustomKeys = new Set<string>();
+    for (const customType of relationshipDraft.customTypes) {
+      const key = customType.key.trim();
+      if (!key) return "Every custom relationship type needs a key.";
+      if (!/^[A-Za-z][A-Za-z0-9:_-]*$/.test(key)) {
+        return "Custom relationship keys must start with a letter and use only letters, numbers, :, _, or -.";
+      }
+      if (builtinRelationshipTypeKeys.has(key)) {
+        return `Custom relationship key '${key}' conflicts with a built-in type.`;
+      }
+      if (seenCustomKeys.has(key)) {
+        return `Custom relationship key '${key}' is duplicated.`;
+      }
+      seenCustomKeys.add(key);
+      if (!customType.label.trim()) return "Every custom relationship type needs a label.";
+      if (!customType.description.trim()) return "Every custom relationship type needs a description.";
+    }
+
+    const validTypeKeys = new Set(availableRelationshipTypes.map((definition) => definition.key));
+    const seenPairs = new Set<string>();
+    for (const link of relationshipDraft.links) {
+      if (!link.typeKey.trim()) return "Every enterprise relationship needs a type.";
+      if (!validTypeKeys.has(link.typeKey)) return `Unknown relationship type '${link.typeKey}'.`;
+      if (!link.targetAgentId.trim()) return "Every enterprise relationship needs a target agent.";
+      if (!relationshipTargetById.has(link.targetAgentId)) {
+        return "One or more relationship targets no longer exist in the visible agent directory.";
+      }
+      const pairKey = `${link.typeKey}::${link.targetAgentId}`;
+      if (seenPairs.has(pairKey)) return "Duplicate enterprise relationship targets are not allowed for the same type.";
+      seenPairs.add(pairKey);
+    }
+
+    return null;
+  }, [
+    availableRelationshipTypes,
+    builtinRelationshipTypeKeys,
+    relationshipDraft.customTypes,
+    relationshipDraft.links,
+    relationshipTargetById,
+  ]);
+
+  const updateEnterpriseRelationships = useMutation({
+    mutationFn: (relationships: AgentEnterpriseRelationshipsRecord | null) =>
+      agentsApi.updateEnterpriseRelationships(
+        agent.id,
+        {
+          relationships,
+          source: "agent_permissions_ui",
+        },
+        companyId,
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agent.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agent.urlKey) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.listGlobal });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(agent.companyId) });
+      pushToast({
+        title: "Enterprise relationships saved",
+        body: "Relationship links, governance routing, and cross-company references are updated.",
+        tone: "success",
+      });
+    },
+    onError: (err) => {
+      const message =
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Could not save enterprise relationships";
+      pushToast({ title: "Save failed", body: message, tone: "error" });
+    },
+  });
+
+  const canCreateAgents = Boolean(agent.permissions?.canCreateAgents);
+  const canAssignTasks = Boolean(agent.access?.canAssignTasks);
+  const canDesignOrganizations = Boolean(agent.permissions?.canDesignOrganizations);
+  const canManageRelationshipTypes = Boolean(agent.permissions?.canManageRelationshipTypes);
+  const canManageServiceDiscovery = Boolean(agent.permissions?.canManageServiceDiscovery);
+  const canManageDeploymentAssignments = Boolean(agent.permissions?.canManageDeploymentAssignments);
+  const canGenerateSystemTopology = Boolean(agent.permissions?.canGenerateSystemTopology);
+  const taskAssignSource = agent.access?.taskAssignSource ?? "none";
+  const taskAssignLocked = agent.role === "ceo" || canCreateAgents;
+  const taskAssignHint =
+    taskAssignSource === "ceo_role"
+      ? "Enabled automatically for CEO agents."
+      : taskAssignSource === "agent_creator"
+        ? "Enabled automatically while this agent can create new agents."
+        : taskAssignSource === "explicit_grant"
+          ? "Enabled via explicit company permission grant."
+          : "Disabled unless explicitly granted.";
+  const buildPermissionUpdate = (overrides: Partial<AgentPermissionUpdate>): AgentPermissionUpdate => ({
+    canCreateAgents,
+    canAssignTasks,
+    canDesignOrganizations,
+    canManageRelationshipTypes,
+    canManageServiceDiscovery,
+    canManageDeploymentAssignments,
+    canGenerateSystemTopology,
+    ...overrides,
+  });
+  const systemPermissionRows = [
+    {
+      key: "canDesignOrganizations" as const,
+      label: "Can design organizations",
+      description: "Generate companies, departments, teams, hierarchy, and nested app structures.",
+      checked: canDesignOrganizations,
+    },
+    {
+      key: "canManageRelationshipTypes" as const,
+      label: "Can manage relationship types",
+      description: "Create and update enterprise relationship semantics, templates, and governance links.",
+      checked: canManageRelationshipTypes,
+    },
+    {
+      key: "canManageServiceDiscovery" as const,
+      label: "Can manage service discovery",
+      description: "Maintain virtual and physical service discovery awareness for company tools.",
+      checked: canManageServiceDiscovery,
+    },
+    {
+      key: "canManageDeploymentAssignments" as const,
+      label: "Can manage deployment assignments",
+      description: "Record which software, tools, hosts, and dependencies this agent owns or uses.",
+      checked: canManageDeploymentAssignments,
+    },
+    {
+      key: "canGenerateSystemTopology" as const,
+      label: "Can generate system topology",
+      description: "Generate enterprise graph, topology, and orchestration views from discovery data.",
+      checked: canGenerateSystemTopology,
+    },
+  ];
+
+  const addRelationshipLink = (preferredTypeKey?: string, preferredTargetAgentId?: string) => {
+    const nextTypeKey =
+      preferredTypeKey && relationshipTypeByKey.has(preferredTypeKey)
+        ? preferredTypeKey
+        : selectedQuickStartType?.key ?? availableRelationshipTypes[0]?.key ?? "matrix_reports_to";
+    const nextTargetId =
+      preferredTargetAgentId && relationshipTargetById.has(preferredTargetAgentId)
+        ? preferredTargetAgentId
+        : selectedQuickStartTarget?.id ?? "";
+    setRelationshipDraft((current) => ({
+      ...current,
+      links: [
+        ...current.links,
+        {
+          id: createRelationshipId(),
+          typeKey: nextTypeKey,
+          targetAgentId: nextTargetId,
+          notes: null,
+        },
+      ],
+    }));
+  };
+  const addWorkflowPack = (typeKeys: string[], targetAgentId?: string) => {
+    const targetId = targetAgentId || selectedQuickStartTarget?.id || "";
+    setRelationshipDraft((current) => {
+      const existingPairs = new Set(current.links.map((link) => `${link.typeKey}::${link.targetAgentId}`));
+      const nextLinks = typeKeys
+        .filter((typeKey) => relationshipTypeByKey.has(typeKey))
+        .filter((typeKey) => !existingPairs.has(`${typeKey}::${targetId}`))
+        .map((typeKey) => ({
+          id: createRelationshipId(),
+          typeKey,
+          targetAgentId: targetId,
+          notes: null,
+        }));
+      return { ...current, links: [...current.links, ...nextLinks] };
+    });
+  };
+  const updateRelationshipLink = (
+    id: string,
+    patch: Partial<AgentEnterpriseRelationshipsRecord["links"][number]>,
+  ) => {
+    setRelationshipDraft((current) => ({
+      ...current,
+      links: current.links.map((link) => (link.id === id ? { ...link, ...patch } : link)),
+    }));
+  };
+  const removeRelationshipLink = (id: string) => {
+    setRelationshipDraft((current) => ({
+      ...current,
+      links: current.links.filter((link) => link.id !== id),
+    }));
+  };
+  const addCustomRelationshipType = () => {
+    setCustomTypesOpen(true);
+    setRelationshipDraft((current) => ({
+      ...current,
+      customTypes: [
+        ...current.customTypes,
+        {
+          key: "",
+          label: "",
+          description: "",
+          category: "custom",
+          aiSemantics: null,
+        },
+      ],
+    }));
+  };
+  const updateCustomRelationshipType = (
+    index: number,
+    patch: Partial<AgentEnterpriseRelationshipsRecord["customTypes"][number]>,
+  ) => {
+    setRelationshipDraft((current) => ({
+      ...current,
+      customTypes: current.customTypes.map((customType, customTypeIndex) =>
+        customTypeIndex === index ? { ...customType, ...patch } : customType,
+      ),
+    }));
+  };
+  const removeCustomRelationshipType = (index: number) => {
+    setRelationshipDraft((current) => ({
+      ...current,
+      customTypes: current.customTypes.filter((_, customTypeIndex) => customTypeIndex !== index),
+    }));
+  };
+  const saveRelationships = () => {
+    if (relationshipValidationError) {
+      pushToast({ title: "Relationships need attention", body: relationshipValidationError, tone: "error" });
+      return;
+    }
+    const payload =
+      relationshipDraft.customTypes.length === 0 && relationshipDraft.links.length === 0
+        ? null
+        : { ...relationshipDraft, updatedAt: relationshipBaseline.updatedAt };
+    updateEnterpriseRelationships.mutate(payload);
+  };
+
+  const metadataEntries = Object.entries(agent.metadata ?? {}).filter(
+    ([key]) => key !== "enterpriseRelationships" && key !== "serviceDiscoveryCache",
+  );
+  const serviceDiscoveryCache = agent.metadata?.serviceDiscoveryCache ?? null;
+  const adapterSummary = [
+    ["Adapter", adapterLabels[agent.adapterType] ?? agent.adapterType],
+    ["Model", asNonEmptyString(agent.adapterConfig?.model) ?? asNonEmptyString(agent.adapterConfig?.modelProfile) ?? "Not set"],
+    ["CWD", asNonEmptyString(agent.adapterConfig?.cwd) ?? asNonEmptyString(agent.adapterConfig?.workingDirectory) ?? "Not set"],
+    ["Default environment", agent.defaultEnvironmentId ?? "Not set"],
+    ["Prompt template", asNonEmptyString(agent.adapterConfig?.promptTemplate) ?? "Managed instructions / not set"],
+  ];
+
+  return (
+    <div className="max-w-6xl space-y-6">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.8fr)]">
+        <section className="rounded-lg border border-border p-4">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-medium">Agent Access</h3>
+              <p className="text-xs text-muted-foreground">
+                Permission flags that control task routing, org design, relationship editing, discovery, and topology.
+              </p>
+            </div>
+            <StatusBadge status={agent.status} />
+          </div>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between gap-4 rounded-lg border border-border/70 p-3 text-sm">
+              <div className="space-y-1">
+                <div>Can create new agents</div>
+                <p className="text-xs text-muted-foreground">
+                  Lets this agent hire agents and turns on task-assignment routing.
+                </p>
+              </div>
+              <ToggleSwitch
+                checked={canCreateAgents}
+                onCheckedChange={() =>
+                  updatePermissions.mutate(
+                    buildPermissionUpdate({
+                      canCreateAgents: !canCreateAgents,
+                      canAssignTasks: !canCreateAgents ? true : canAssignTasks,
+                      canDesignOrganizations: !canCreateAgents ? true : canDesignOrganizations,
+                      canManageRelationshipTypes: !canCreateAgents ? true : canManageRelationshipTypes,
+                      canManageServiceDiscovery: !canCreateAgents ? true : canManageServiceDiscovery,
+                      canManageDeploymentAssignments: !canCreateAgents ? true : canManageDeploymentAssignments,
+                      canGenerateSystemTopology: !canCreateAgents ? true : canGenerateSystemTopology,
+                    }),
+                  )
+                }
+                disabled={updatePermissions.isPending}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-4 rounded-lg border border-border/70 p-3 text-sm">
+              <div className="space-y-1">
+                <div>Can assign tasks</div>
+                <p className="text-xs text-muted-foreground">{taskAssignHint}</p>
+              </div>
+              <ToggleSwitch
+                checked={canAssignTasks}
+                onCheckedChange={() =>
+                  updatePermissions.mutate(buildPermissionUpdate({ canAssignTasks: !canAssignTasks }))
+                }
+                disabled={updatePermissions.isPending || taskAssignLocked}
+              />
+            </div>
+            {systemPermissionRows.map((row) => (
+              <div key={row.key} className="flex items-center justify-between gap-4 rounded-lg border border-border/70 p-3 text-sm">
+                <div className="space-y-1">
+                  <div>{row.label}</div>
+                  <p className="text-xs text-muted-foreground">{row.description}</p>
+                </div>
+                <ToggleSwitch
+                  checked={row.checked}
+                  onCheckedChange={(checked) =>
+                    updatePermissions.mutate(buildPermissionUpdate({ [row.key]: checked }))
+                  }
+                  disabled={updatePermissions.isPending}
+                />
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="rounded-lg border border-border p-4">
+          <h3 className="text-sm font-medium">Operational Attributes</h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Adapter, identity, cwd, model, prompt, environment, and chain-of-command context.
+          </p>
+          <div className="mt-4 space-y-3">
+            <SummaryRow label="Reports to">
+              <span className="text-xs">
+                {agent.chainOfCommand.length >= 2
+                  ? agent.chainOfCommand[agent.chainOfCommand.length - 2]?.name
+                  : agent.reportsTo ?? "None"}
+              </span>
+            </SummaryRow>
+            <SummaryRow label="Company">
+              <span className="text-xs">{visibleAgents.find((entry) => entry.id === agent.id)?.companyName ?? agent.companyId}</span>
+            </SummaryRow>
+            <SummaryRow label="Role">
+              <span className="text-xs">{roleLabels[agent.role] ?? agent.role}</span>
+            </SummaryRow>
+            <SummaryRow label="Title">
+              <span className="text-xs">{agent.title ?? "Not set"}</span>
+            </SummaryRow>
+            {adapterSummary.map(([label, value]) => (
+              <SummaryRow key={label} label={label}>
+                <span className="max-w-[220px] truncate text-xs font-mono" title={value}>{value}</span>
+              </SummaryRow>
+            ))}
+            <div className="rounded-lg border border-border/70 bg-muted/20 p-3 text-xs">
+              <div className="mb-1 font-medium">Capabilities</div>
+              <p className="whitespace-pre-wrap text-muted-foreground">{agent.capabilities || "No capability summary set."}</p>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <section className="rounded-lg border border-border p-4">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-medium">Relationship Workspace</h3>
+            <p className="text-xs text-muted-foreground">
+              Build same-company and cross-company governance, finance, service, asset, matrix, and communication links.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setRelationshipDraft(relationshipBaseline)}
+              disabled={!relationshipsDirty || updateEnterpriseRelationships.isPending}
+            >
+              Reset relationships
+            </Button>
+            <Button
+              size="sm"
+              onClick={saveRelationships}
+              disabled={!relationshipsDirty || updateEnterpriseRelationships.isPending || Boolean(relationshipValidationError)}
+            >
+              {updateEnterpriseRelationships.isPending ? "Saving..." : "Save relationships"}
+            </Button>
+          </div>
+        </div>
+        {relationshipValidationError ? (
+          <div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+            {relationshipValidationError}
+          </div>
+        ) : null}
+
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.7fr)]">
+          <div className="space-y-3">
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Relationship type</label>
+                <select
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={selectedQuickStartType?.key ?? ""}
+                  onChange={(event) => setQuickStartTypeKey(event.target.value)}
+                >
+                  {availableRelationshipTypeGroups.map((group) => (
+                    <optgroup key={group.value} label={group.label}>
+                      {group.definitions.map((definition) => (
+                        <option key={definition.key} value={definition.key}>
+                          {definition.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Target agent</label>
+                <select
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={selectedQuickStartTarget?.id ?? ""}
+                  onChange={(event) => setQuickStartTargetId(event.target.value)}
+                >
+                  <option value="">Select agent</option>
+                  {relationshipTargetGroups.map(([companyName, candidates]) => (
+                    <optgroup key={companyName} label={companyName}>
+                      {candidates.map((candidate) => (
+                        <option key={candidate.id} value={candidate.id}>
+                          {candidate.name}
+                          {candidate.title ? ` - ${candidate.title}` : ""}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-end">
+                <Button
+                  className="w-full"
+                  variant="outline"
+                  onClick={() => addRelationshipLink(selectedQuickStartType?.key, selectedQuickStartTarget?.id)}
+                  disabled={!selectedQuickStartType || !selectedQuickStartTarget}
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add relationship
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Search target agents</label>
+              <Input
+                value={relationshipTargetSearch}
+                onChange={(event) => setRelationshipTargetSearch(event.target.value)}
+                placeholder="Search by agent, company, role, or title"
+              />
+            </div>
+
+            <div className="rounded-lg border border-border bg-muted/20 p-3">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <div className="text-xs font-medium">Live target search</div>
+                <span className="text-[11px] text-muted-foreground">
+                  Showing {liveRelationshipSearchResults.length} of {filteredRelationshipTargets.length}
+                </span>
+              </div>
+              {liveRelationshipSearchResults.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No target agents match the current search.</p>
+              ) : (
+                <div className="grid gap-2 lg:grid-cols-2">
+                  {liveRelationshipSearchResults.map((candidate) => (
+                    <button
+                      key={candidate.id}
+                      type="button"
+                      className="flex items-start justify-between gap-3 rounded-lg border border-border bg-background px-3 py-3 text-left transition-colors hover:bg-muted/50"
+                      onClick={() => addRelationshipLink(selectedQuickStartType?.key, candidate.id)}
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium">{candidate.name}</div>
+                        <div className="truncate text-xs text-muted-foreground">
+                          {candidate.companyName ? `${candidate.companyName} - ` : ""}
+                          {candidate.role}
+                          {candidate.title ? ` - ${candidate.title}` : ""}
+                        </div>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+                        Add
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="rounded-lg border border-border p-3">
+              <h4 className="text-xs font-medium">Workflow packs</h4>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Add common bundles without hand-wiring every link type.
+              </p>
+              <div className="mt-3 space-y-2">
+                {BUILTIN_ENTERPRISE_WORKFLOW_PACKS.map((pack) => (
+                  <div key={pack.key} className="rounded-lg border border-border/70 p-3">
+                    <div className="text-xs font-medium">{pack.label}</div>
+                    <p className="mt-1 text-[11px] text-muted-foreground">{pack.description}</p>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="mt-2 h-7 px-2 text-xs"
+                      onClick={() => addWorkflowPack(pack.relationshipTypeKeys, selectedQuickStartTarget?.id)}
+                      disabled={!selectedQuickStartTarget}
+                    >
+                      Add pack
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 space-y-3">
+          {relationshipDraft.links.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-border/80 bg-muted/20 p-4 text-sm">
+              <div className="font-medium">No relationship links yet.</div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Add a live target above, or use a workflow pack to restore cross-company governance links.
+              </p>
+            </div>
+          ) : (
+            relationshipDraft.links.map((link) => {
+              const selectedType = relationshipTypeByKey.get(link.typeKey);
+              const selectedTarget = relationshipTargetById.get(link.targetAgentId);
+              return (
+                <div key={link.id} className="space-y-3 rounded-lg border border-border p-3">
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground">Type</label>
+                      <select
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        value={link.typeKey}
+                        onChange={(event) => updateRelationshipLink(link.id, { typeKey: event.target.value })}
+                      >
+                        {availableRelationshipTypeGroups.map((group) => (
+                          <optgroup key={group.value} label={group.label}>
+                            {group.definitions.map((definition) => (
+                              <option key={definition.key} value={definition.key}>
+                                {definition.label} ({definition.key})
+                              </option>
+                            ))}
+                          </optgroup>
+                        ))}
+                      </select>
+                      {selectedType ? <p className="text-xs text-muted-foreground">{selectedType.description}</p> : null}
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground">Target agent</label>
+                      <select
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        value={link.targetAgentId}
+                        onChange={(event) => updateRelationshipLink(link.id, { targetAgentId: event.target.value })}
+                      >
+                        <option value="">Select agent</option>
+                        {!selectedTarget && link.targetAgentId ? (
+                          <option value={link.targetAgentId}>Missing agent ({link.targetAgentId.slice(0, 8)})</option>
+                        ) : null}
+                        {selectedTarget && !filteredRelationshipTargets.some((candidate) => candidate.id === selectedTarget.id) ? (
+                          <optgroup label="Selected target">
+                            <option value={selectedTarget.id}>
+                              {selectedTarget.name}
+                              {selectedTarget.companyName ? ` - ${selectedTarget.companyName}` : ""}
+                            </option>
+                          </optgroup>
+                        ) : null}
+                        {relationshipTargetGroups.map(([companyName, candidates]) => (
+                          <optgroup key={companyName} label={companyName}>
+                            {candidates.map((candidate) => (
+                              <option key={candidate.id} value={candidate.id}>
+                                {candidate.name}
+                                {candidate.title ? ` - ${candidate.title}` : ""}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ))}
+                      </select>
+                      {selectedTarget ? (
+                        <p className="text-xs text-muted-foreground">
+                          {selectedTarget.companyName ? `${selectedTarget.companyName} - ` : ""}
+                          {selectedTarget.role}
+                          {selectedTarget.title ? ` - ${selectedTarget.title}` : ""}
+                        </p>
+                      ) : link.targetAgentId ? (
+                        <p className="text-xs text-red-600 dark:text-red-400">
+                          This target agent is no longer present in the live directory.
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground">Notes</label>
+                    <textarea
+                      className="min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={link.notes ?? ""}
+                      onChange={(event) =>
+                        updateRelationshipLink(link.id, {
+                          notes: event.target.value.trim().length > 0 ? event.target.value : null,
+                        })
+                      }
+                      placeholder="Optional context, scope, rule, or governance instruction."
+                    />
+                  </div>
+                  <div className="flex justify-end">
+                    <Button size="sm" variant="ghost" onClick={() => removeRelationshipLink(link.id)}>
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Remove relationship
+                    </Button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        <Collapsible open={customTypesOpen} onOpenChange={setCustomTypesOpen}>
+          <div className="mt-4 rounded-lg border border-border">
+            <div className="flex items-center justify-between gap-3 px-4 py-3">
+              <CollapsibleTrigger className="flex min-w-0 flex-1 items-start justify-between gap-3 text-left">
+                <div>
+                  <h4 className="text-sm font-medium">Custom relationship types</h4>
+                  <p className="text-xs text-muted-foreground">
+                    Use only when built-in relationship types do not cover the business rule.
+                  </p>
+                </div>
+                <ChevronDown className={cn("mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform", customTypesOpen && "rotate-180")} />
+              </CollapsibleTrigger>
+              <Button size="sm" variant="outline" onClick={addCustomRelationshipType}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add type
+              </Button>
+            </div>
+            <CollapsibleContent className="space-y-3 border-t border-border px-4 py-4">
+              {relationshipDraft.customTypes.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No custom relationship types yet.</p>
+              ) : (
+                relationshipDraft.customTypes.map((customType, index) => (
+                  <div key={`custom-type-${index}`} className="space-y-3 rounded-lg border border-border p-3">
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium text-muted-foreground">Key</label>
+                        <Input
+                          value={customType.key}
+                          onChange={(event) => updateCustomRelationshipType(index, { key: event.target.value })}
+                          placeholder="procuredThrough"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium text-muted-foreground">Label</label>
+                        <Input
+                          value={customType.label}
+                          onChange={(event) => updateCustomRelationshipType(index, { label: event.target.value })}
+                          placeholder="Procured through"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium text-muted-foreground">Category</label>
+                        <select
+                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          value={customType.category}
+                          onChange={(event) =>
+                            updateCustomRelationshipType(index, {
+                              category: event.target.value as EnterpriseRelationshipCategory,
+                            })
+                          }
+                        >
+                          {enterpriseRelationshipCategoryOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium text-muted-foreground">Description</label>
+                        <textarea
+                          className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          value={customType.description}
+                          onChange={(event) => updateCustomRelationshipType(index, { description: event.target.value })}
+                          placeholder="Describe what this relationship means."
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium text-muted-foreground">AI semantics</label>
+                        <textarea
+                          className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          value={customType.aiSemantics ?? ""}
+                          onChange={(event) =>
+                            updateCustomRelationshipType(index, {
+                              aiSemantics: event.target.value.trim().length > 0 ? event.target.value : null,
+                            })
+                          }
+                          placeholder="Tell the AI how to interpret and use this relationship."
+                        />
+                      </div>
+                    </div>
+                    <div className="flex justify-end">
+                      <Button size="sm" variant="ghost" onClick={() => removeCustomRelationshipType(index)}>
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Remove type
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </CollapsibleContent>
+          </div>
+        </Collapsible>
+      </section>
+
+      <section className="rounded-lg border border-border p-4">
+        <h3 className="text-sm font-medium">Service Discovery & Software Assignments</h3>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Tools, hosts, software categories, endpoints, and assignments this agent should know about. Secrets are redacted.
+        </p>
+        {!serviceDiscoveryCache || serviceDiscoveryCache.services.length === 0 ? (
+          <p className="mt-4 text-sm text-muted-foreground">No service discovery cache is attached to this agent yet.</p>
+        ) : (
+          <div className="mt-4 space-y-3">
+            <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+              <span className="rounded-full bg-muted px-2 py-1">Scope: {serviceDiscoveryCache.scope ?? "not set"}</span>
+              <span className="rounded-full bg-muted px-2 py-1">Cached: {serviceDiscoveryCache.cachedAt ?? "not set"}</span>
+              <span className="rounded-full bg-muted px-2 py-1">{serviceDiscoveryCache.services.length} services</span>
+            </div>
+            {serviceDiscoveryCache.services.map((service) => (
+              <div key={service.id} className="rounded-lg border border-border p-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium">{service.name}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {service.kind} - {service.hostKind}
+                      {service.endpoint ? ` - ${formatStructuredValue("endpoint", service.endpoint)}` : ""}
+                      {service.url ? ` - ${formatStructuredValue("url", service.url)}` : ""}
+                    </div>
+                  </div>
+                  <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">{service.id}</span>
+                </div>
+                {service.description ? (
+                  <p className="mt-2 text-xs text-muted-foreground">{service.description}</p>
+                ) : null}
+                {(service.softwareAssignments ?? []).length > 0 ? (
+                  <div className="mt-3 space-y-2">
+                    <div className="text-xs font-medium">Software assignments</div>
+                    {service.softwareAssignments!.map((assignment, index) => (
+                      <div key={assignment.id ?? `${service.id}-assignment-${index}`} className="rounded-md bg-muted/30 p-2 text-xs">
+                        <div className="font-medium">{assignment.assignmentKind}</div>
+                        {assignment.assignedCapabilityKeys?.length ? (
+                          <div className="text-muted-foreground">Capabilities: {assignment.assignedCapabilityKeys.join(", ")}</div>
+                        ) : null}
+                        {assignment.assignedAgentIds?.length ? (
+                          <div className="text-muted-foreground">Agents: {assignment.assignedAgentIds.join(", ")}</div>
+                        ) : null}
+                        {assignment.notes ? <div className="text-muted-foreground">Notes: {assignment.notes}</div> : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {service.metadata ? (
+                  <pre className="mt-3 max-h-48 overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">
+                    {formatStructuredValue("metadata", service.metadata)}
+                  </pre>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-lg border border-border p-4">
+        <h3 className="text-sm font-medium">Metadata & Runtime Configuration</h3>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Remaining structured metadata and runtime config used by the universal product layer. Secrets are redacted.
+        </p>
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <div className="space-y-3">
+            <h4 className="text-xs font-medium text-muted-foreground">Agent metadata</h4>
+            {metadataEntries.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No extra metadata fields.</p>
+            ) : (
+              metadataEntries.map(([key, value]) => (
+                <div key={key} className="rounded-lg border border-border/70 p-3">
+                  <div className="mb-1 text-xs font-medium">{key}</div>
+                  <pre className="max-h-52 overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">
+                    {formatStructuredValue(key, value)}
+                  </pre>
+                </div>
+              ))
+            )}
+          </div>
+          <div className="space-y-3">
+            <h4 className="text-xs font-medium text-muted-foreground">Runtime config</h4>
+            <pre className="max-h-96 overflow-auto rounded-lg border border-border/70 p-3 text-xs whitespace-pre-wrap">
+              {formatStructuredValue("runtimeConfig", agent.runtimeConfig)}
+            </pre>
+            <h4 className="text-xs font-medium text-muted-foreground">Adapter config</h4>
+            <pre className="max-h-96 overflow-auto rounded-lg border border-border/70 p-3 text-xs whitespace-pre-wrap">
+              {formatStructuredValue("adapterConfig", agent.adapterConfig)}
+            </pre>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

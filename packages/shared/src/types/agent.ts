@@ -396,6 +396,7 @@ export interface Agent {
 export interface AgentDetail extends Agent {
   chainOfCommand: AgentChainOfCommandEntry[];
   access: AgentAccessState;
+  enterpriseRelationships: AgentEnterpriseRelationshipsView;
 }
 
 export interface EnterpriseGraphOrgNode {
