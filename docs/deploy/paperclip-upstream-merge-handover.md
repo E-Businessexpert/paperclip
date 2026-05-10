@@ -35,10 +35,12 @@ git rev-list --left-right --count HEAD...userfork/master
 - The sidebar should expose `Full Org Chart`, `Global AgentChatTR`, and company `AgentChatTR` as separate links/functions.
 - The full organization icon belongs in the universal sidebar top bar and must link to the global `/full-structure` route.
 - The global AgentChatTR icon belongs in the same universal sidebar top bar and must link to the global `/chatrooms` route.
-- Company-prefixed `/FAM/full-structure` links must render the full-structure page in the company context; do not redirect them away to the global route.
+- Company-prefixed `/FAM/full-structure` links must render the full-structure page in the company context and seed the selected company, but the visible graph is still the family-wide enterprise structure.
+- Company-specific org charts belong on `/:companyPrefix/org`; do not turn `/full-structure` into a single-company page.
 - Do not add `/chatrooms` as a fake container for the full organization link.
 - Do not make company `AgentChatTR` dump every agent; only the global `/chatrooms` route may list every visible company agent.
 - Keep upstream's native company `OrgChart` page separate from the custom enterprise `FullStructure` page.
+- Do not route the legacy `FullStructureCorporationMapPage`; it is the wrong standalone corporation map that previously replaced the interactive enterprise org chart.
 - Preserve enterprise relationship metadata and permission fields in shared/server agent types.
 - Preserve legacy live enterprise relationship keys `budgetFundedBy`, `mustInform`, and `statusReportedTo`; they are still present in live metadata and must remain resolvable after upstream taxonomy updates.
 - Preserve the agent detail `Agent Permissions` page and dashboard context panels: they must expose relationship workspace editing, cross-company target search, expanded permission toggles, service discovery/software assignments, adapter config, runtime config, and redacted metadata.
@@ -65,6 +67,8 @@ git rev-list --left-right --count HEAD...userfork/master
   Fix: keep `AgentDetail.enterpriseRelationships` in the shared type, keep the `Agent Permissions` tab, and run `ui/src/pages/AgentDetailEnterprise.test.tsx` with each upstream merge.
 - Issue: native upstream org-chart code was overwritten by the custom enterprise graph.
   Fix: keep `ui/src/pages/OrgChart.tsx` as upstream's company chart and keep `ui/src/pages/FullStructure.tsx` as the custom enterprise graph.
+- Issue: the restored full-org UI was present but not protected by an interaction-level test, so filter placement, wheel zoom, reset, collapse, and card detail regressions could slip through a future merge.
+  Fix: keep `ui/src/pages/FullStructureEnterpriseOrgChart.test.tsx` in the focused preservation suite.
 - Issue: deployment recovery could restart an old image after reboot.
   Fix: update Portainer stack and host recovery compose files to the same image tag.
 - Issue: migration numbering collided with upstream migrations.
@@ -86,16 +90,19 @@ pnpm --filter @paperclipai/shared typecheck
 pnpm --filter @paperclipai/db typecheck
 pnpm --filter @paperclipai/server typecheck
 pnpm --filter @paperclipai/ui build
-pnpm exec vitest run --project @paperclipai/ui ui/src/components/Sidebar.test.tsx ui/src/lib/company-routes.test.ts ui/src/pages/FullStructure.test.ts ui/src/pages/FullStructurePage.test.ts ui/src/pages/AgentChatTR.test.tsx ui/src/pages/AgentDetailEnterprise.test.tsx ui/src/pages/CompanySettings.test.tsx --reporter=verbose
+pnpm exec vitest run --project @paperclipai/ui ui/src/components/Sidebar.test.tsx ui/src/components/SidebarCompanyMenu.test.tsx ui/src/lib/company-routes.test.ts ui/src/pages/FullStructure.test.ts ui/src/pages/FullStructurePage.test.tsx ui/src/pages/FullStructureEnterpriseOrgChart.test.tsx ui/src/pages/AgentChatTR.test.tsx ui/src/pages/AgentDetailEnterprise.test.tsx ui/src/pages/CompanySettings.test.tsx --reporter=verbose
 ```
 
 Expected route/link behavior:
 
 - `/full-structure` renders the global full organization chart.
-- `/:companyPrefix/full-structure` renders the full-structure page in company context and scopes the graph to that connected company graph.
+- `/:companyPrefix/full-structure` renders the same family-wide full organization chart while seeding that company as the route context.
+- `/:companyPrefix/org` renders the company-only native org chart.
 - The sidebar full-org icon href is `/full-structure`.
 - The sidebar global AgentChatTR icon href is `/chatrooms`.
 - The sidebar contains separate full-org, global AgentChatTR, and company AgentChatTR links.
 - `/chatrooms` resolves to global AgentChatTR and seeds the family/trust company when available.
 - `/:companyPrefix/chatrooms` resolves to the company-scoped AgentChatTR board route.
 - The sidebar does not place the full organization chart inside the `AgentChatTR` section.
+- The full-org chart keeps compact sticky top filters, the company/line color key, mouse-wheel graph zoom, per-node collapse/expand, reset-to-uncollapsed behavior, card-detail toggles, graph fullscreen, and minimized Wiring Inspector.
+- The full-org color key must include Cornerstone and every visible company returned by the family enterprise graph.
