@@ -40,6 +40,8 @@ export const portabilityFileEntrySchema = z.union([
 export const portabilityCompanyManifestEntrySchema = z.object({
   path: z.string().min(1),
   name: z.string().min(1),
+  issuePrefix: z.string().min(1).nullable().default(null),
+  parentIssuePrefix: z.string().min(1).nullable().default(null),
   description: z.string().nullable(),
   brandColor: z.string().nullable(),
   logoPath: z.string().nullable(),

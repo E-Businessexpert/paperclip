@@ -2519,6 +2519,12 @@ function buildManifestFromPackageFiles(
     company: {
       path: resolvedCompanyPath,
       name: companyName,
+      issuePrefix: asString(companyFrontmatter.issuePrefix) ?? asString(paperclipCompany.issuePrefix),
+      parentIssuePrefix:
+        asString(companyFrontmatter.parentIssuePrefix)
+        ?? asString(companyFrontmatter.parentCompanyIssuePrefix)
+        ?? asString(paperclipCompany.parentIssuePrefix)
+        ?? asString(paperclipCompany.parentCompanyIssuePrefix),
       description: asString(companyFrontmatter.description),
       brandColor: asString(paperclipCompany.brandColor),
       logoPath: asString(paperclipCompany.logoPath) ?? asString(paperclipCompany.logo),
@@ -3055,6 +3061,11 @@ export function companyPortabilityService(db: Db, storage?: StorageService) {
     });
     const company = await companies.getById(companyId);
     if (!company) throw notFound("Company not found");
+    const companyDirectory = await companies.list();
+    const parentCompany = company.parentCompanyId
+      ? companyDirectory.find((entry) => entry.id === company.parentCompanyId) ?? null
+      : null;
+    const parentIssuePrefix = parentCompany?.issuePrefix ?? null;
 
     const files: Record<string, CompanyPortabilityFileEntry> = {};
     const warnings: string[] = [];
@@ -3254,6 +3265,8 @@ export function companyPortabilityService(db: Db, storage?: StorageService) {
     files[companyPath] = buildMarkdown(
       {
         name: company.name,
+        issuePrefix: company.issuePrefix,
+        parentIssuePrefix,
         description: company.description ?? null,
         schema: "agentcompanies/v1",
         slug: rootPath,
@@ -3572,6 +3585,8 @@ export function companyPortabilityService(db: Db, storage?: StorageService) {
       {
         schema: "paperclip/v1",
         company: stripEmptyValues({
+          issuePrefix: company.issuePrefix,
+          parentIssuePrefix,
           brandColor: company.brandColor ?? null,
           logoPath: companyLogoPath,
           attachmentMaxBytes: company.attachmentMaxBytes,
@@ -4069,9 +4084,37 @@ export function companyPortabilityService(db: Db, storage?: StorageService) {
     const warnings = [...plan.preview.warnings];
     const include = plan.include;
 
+    async function resolveImportParentPatch(
+      targetCompanyId: string | null,
+    ): Promise<{ parentCompanyId?: string | null }> {
+      if (!include.company || !sourceManifest.company) return {};
+      const parentIssuePrefix = sourceManifest.company.parentIssuePrefix;
+      if (parentIssuePrefix === null) return { parentCompanyId: null };
+
+      const normalizedParentIssuePrefix = parentIssuePrefix.trim().toUpperCase();
+      const allCompanies = await companies.list();
+      const parentCompany = allCompanies.find(
+        (entry) => entry.issuePrefix.trim().toUpperCase() === normalizedParentIssuePrefix,
+      );
+      if (!parentCompany) {
+        warnings.push(
+          `Skipped company parent restore because parent issue prefix ${parentIssuePrefix} was not found in this instance.`,
+        );
+        return {};
+      }
+      if (targetCompanyId && parentCompany.id === targetCompanyId) {
+        warnings.push(
+          `Skipped company parent restore because ${parentIssuePrefix} would make the company its own parent.`,
+        );
+        return {};
+      }
+      return { parentCompanyId: parentCompany.id };
+    }
+
     let targetCompany: {
       id: string;
       name: string;
+      parentCompanyId?: string | null;
       requireBoardApprovalForNewAgents?: boolean | null;
       attachmentMaxBytes?: number | null;
     } | null = null;
@@ -4092,7 +4135,9 @@ export function companyPortabilityService(db: Db, storage?: StorageService) {
         sourceManifest.company?.name ??
         sourceManifest.source?.companyName ??
         "Imported Company";
+      const parentPatch = await resolveImportParentPatch(null);
       const created = await companies.create({
+        ...parentPatch,
         name: companyName,
         description: include.company ? (sourceManifest.company?.description ?? null) : null,
         brandColor: include.company ? (sourceManifest.company?.brandColor ?? null) : null,
@@ -4126,7 +4171,9 @@ export function companyPortabilityService(db: Db, storage?: StorageService) {
       targetCompany = await companies.getById(input.target.companyId);
       if (!targetCompany) throw notFound("Target company not found");
       if (include.company && sourceManifest.company && mode === "board_full") {
+        const parentPatch = await resolveImportParentPatch(targetCompany.id);
         const updated = await companies.update(targetCompany.id, {
+          ...parentPatch,
           name: sourceManifest.company.name,
           description: sourceManifest.company.description,
           brandColor: sourceManifest.company.brandColor,

@@ -86,6 +86,13 @@ export function generateReadme(
     lines.push(`> ${options.companyDescription}`);
     lines.push("");
   }
+  if (manifest.company?.issuePrefix || manifest.company?.parentIssuePrefix) {
+    lines.push("## Company Hierarchy");
+    lines.push("");
+    lines.push(`- Issue prefix: ${manifest.company.issuePrefix ?? "unassigned"}`);
+    lines.push(`- Parent issue prefix: ${manifest.company.parentIssuePrefix ?? "root"}`);
+    lines.push("");
+  }
 
   // Org chart image (generated during export as images/org-chart.png)
   if (manifest.agents.length > 0) {

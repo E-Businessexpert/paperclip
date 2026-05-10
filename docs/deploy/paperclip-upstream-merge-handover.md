@@ -42,6 +42,7 @@ git rev-list --left-right --count HEAD...userfork/master
 - Keep upstream's native company `OrgChart` page separate from the custom enterprise `FullStructure` page.
 - Do not route the legacy `FullStructureCorporationMapPage`; it is the wrong standalone corporation map that previously replaced the interactive enterprise org chart.
 - Preserve enterprise relationship metadata and permission fields in shared/server agent types.
+- Preserve company `parentCompanyId` from the database through shared types, server company responses, portability manifests, and the full-org graph. The live DB column is `companies.parent_company_id`.
 - Preserve legacy live enterprise relationship keys `budgetFundedBy`, `mustInform`, and `statusReportedTo`; they are still present in live metadata and must remain resolvable after upstream taxonomy updates.
 - Preserve the agent detail `Agent Permissions` page and dashboard context panels: they must expose relationship workspace editing, cross-company target search, expanded permission toggles, service discovery/software assignments, adapter config, runtime config, and redacted metadata.
 - Preserve database migration compatibility for previously-applied local migrations when upstream renumbers or replaces migration files.
@@ -65,6 +66,8 @@ git rev-list --left-right --count HEAD...userfork/master
   Fix: keep compatibility aliases for the live camelCase keys in `packages/shared/src/types/agent.ts`.
 - Issue: the upstream merge kept relationship data on the API but removed the visible agent detail controls and type contract, making the agent dashboard look like relationships, metadata, service discovery, and advanced permissions had disappeared.
   Fix: keep `AgentDetail.enterpriseRelationships` in the shared type, keep the `Agent Permissions` tab, and run `ui/src/pages/AgentDetailEnterprise.test.tsx` with each upstream merge.
+- Issue: the live DB still had company hierarchy in `companies.parent_company_id`, but the merged repo no longer had the field in schema/shared/server selection, so the API and full-org UI could lose company-to-company links.
+  Fix: keep migration `0082_company_parent_hierarchy`, `Company.parentCompanyId`, `companyService.companySelection.parentCompanyId`, and portability `issuePrefix`/`parentIssuePrefix` support.
 - Issue: native upstream org-chart code was overwritten by the custom enterprise graph.
   Fix: keep `ui/src/pages/OrgChart.tsx` as upstream's company chart and keep `ui/src/pages/FullStructure.tsx` as the custom enterprise graph.
 - Issue: the restored full-org UI was present but not protected by an interaction-level test, so filter placement, wheel zoom, reset, collapse, and card detail regressions could slip through a future merge.
@@ -91,6 +94,7 @@ pnpm --filter @paperclipai/db typecheck
 pnpm --filter @paperclipai/server typecheck
 pnpm --filter @paperclipai/ui build
 pnpm exec vitest run --project @paperclipai/ui ui/src/components/Sidebar.test.tsx ui/src/components/SidebarCompanyMenu.test.tsx ui/src/lib/company-routes.test.ts ui/src/pages/FullStructure.test.ts ui/src/pages/FullStructurePage.test.tsx ui/src/pages/FullStructureEnterpriseOrgChart.test.tsx ui/src/pages/AgentChatTR.test.tsx ui/src/pages/AgentDetailEnterprise.test.tsx ui/src/pages/CompanySettings.test.tsx --reporter=verbose
+pnpm --filter @paperclipai/server test -- company-portability
 ```
 
 Expected route/link behavior:
@@ -106,3 +110,13 @@ Expected route/link behavior:
 - The sidebar does not place the full organization chart inside the `AgentChatTR` section.
 - The full-org chart keeps compact sticky top filters, the company/line color key, mouse-wheel graph zoom, per-node collapse/expand, reset-to-uncollapsed behavior, card-detail toggles, graph fullscreen, and minimized Wiring Inspector.
 - The full-org color key must include Cornerstone and every visible company returned by the family enterprise graph.
+
+Expected live hierarchy data:
+
+- `FAM` has no parent.
+- `COR` parent is `FAM`.
+- `EBUAA`, `EBUAAA`, `MSG`, `OPS`, and `REA` parent is `COR`.
+- `EBUA` parent is `EBUAA`.
+- `EBU` and `ECO` parent is `EBUA`.
+- Formal cross-company `reportsTo` links should include `COR -> FAM`, `EBUAA -> COR`, `EBUAAA -> COR`, `MSG -> COR`, `OPS -> COR`, `REA -> COR`, `EBUA -> EBUAA`, and `EBU/ECO -> EBUA`.
+- Live metadata should keep adapter type/config, runtime config, permissions, service-discovery cache, relationship workspace, identity, run policy, and skill metadata on every active enterprise agent.

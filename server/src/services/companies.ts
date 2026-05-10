@@ -38,6 +38,7 @@ export function companyService(db: Db) {
 
   const companySelection = {
     id: companies.id,
+    parentCompanyId: companies.parentCompanyId,
     name: companies.name,
     description: companies.description,
     status: companies.status,
@@ -137,7 +138,42 @@ export function companyService(db: Db) {
       && constraint === "companies_issue_prefix_idx";
   }
 
+  async function assertParentCompanyCanBeAssigned(
+    companyId: string | null,
+    parentCompanyId: string | null | undefined,
+    database: Pick<Db, "select"> = db,
+  ) {
+    if (!parentCompanyId) return;
+    if (companyId && parentCompanyId === companyId) {
+      throw unprocessable("Company cannot be its own parent");
+    }
+
+    let currentParentId: string | null = parentCompanyId;
+    const visited = new Set<string>();
+    while (currentParentId) {
+      if (companyId && currentParentId === companyId) {
+        throw unprocessable("Company hierarchy cannot contain cycles");
+      }
+      if (visited.has(currentParentId)) {
+        throw unprocessable("Company hierarchy cannot contain cycles");
+      }
+      visited.add(currentParentId);
+
+      const parent: { id: string; parentCompanyId: string | null } | null = await database
+        .select({
+          id: companies.id,
+          parentCompanyId: companies.parentCompanyId,
+        })
+        .from(companies)
+        .where(eq(companies.id, currentParentId))
+        .then((rows) => rows[0] ?? null);
+      if (!parent) throw notFound("Parent company not found");
+      currentParentId = parent.parentCompanyId;
+    }
+  }
+
   async function createCompanyWithUniquePrefix(data: typeof companies.$inferInsert) {
+    await assertParentCompanyCanBeAssigned(null, data.parentCompanyId);
     const base = deriveIssuePrefixBase(data.name);
     let suffix = 1;
     while (suffix < 10000) {
@@ -194,6 +230,11 @@ export function companyService(db: Db) {
         if (!existing) return null;
 
         const { logoAssetId, ...companyPatch } = data;
+        await assertParentCompanyCanBeAssigned(
+          existing.id,
+          companyPatch.parentCompanyId,
+          tx,
+        );
 
         if (logoAssetId !== undefined && logoAssetId !== null) {
           const nextLogoAsset = await tx

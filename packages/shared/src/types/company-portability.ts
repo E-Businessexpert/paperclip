@@ -33,6 +33,8 @@ export type CompanyPortabilityFileEntry =
 export interface CompanyPortabilityCompanyManifestEntry {
   path: string;
   name: string;
+  issuePrefix: string | null;
+  parentIssuePrefix: string | null;
   description: string | null;
   brandColor: string | null;
   logoPath: string | null;

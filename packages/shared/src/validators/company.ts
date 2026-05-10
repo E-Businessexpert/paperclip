@@ -14,6 +14,7 @@ const attachmentMaxBytesSchema = z
   .max(MAX_COMPANY_ATTACHMENT_MAX_BYTES);
 
 export const createCompanySchema = z.object({
+  parentCompanyId: z.string().uuid().nullable().optional(),
   name: z.string().min(1),
   description: z.string().optional().nullable(),
   budgetMonthlyCents: z.number().int().nonnegative().optional().default(0),

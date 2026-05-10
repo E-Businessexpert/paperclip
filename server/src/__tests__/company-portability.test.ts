@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CompanyPortabilityFileEntry } from "@paperclipai/shared";
 
 const companySvc = {
+  list: vi.fn(),
   getById: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
@@ -143,6 +144,7 @@ describe("company portability", () => {
     });
     companySvc.getById.mockResolvedValue({
       id: "company-1",
+      parentCompanyId: "company-parent",
       name: "Paperclip",
       description: null,
       issuePrefix: "PAP",
@@ -151,9 +153,24 @@ describe("company portability", () => {
       logoUrl: null,
       requireBoardApprovalForNewAgents: false,
     });
+    companySvc.list.mockResolvedValue([
+      {
+        id: "company-parent",
+        parentCompanyId: null,
+        name: "Parent Company",
+        issuePrefix: "PAR",
+      },
+      {
+        id: "company-1",
+        parentCompanyId: "company-parent",
+        name: "Paperclip",
+        issuePrefix: "PAP",
+      },
+    ]);
     companySvc.create.mockResolvedValue({
       id: "company-imported",
       name: "Imported Paperclip",
+      parentCompanyId: "company-parent",
       requireBoardApprovalForNewAgents: false,
     });
     agentSvc.list.mockResolvedValue([
@@ -441,6 +458,8 @@ describe("company portability", () => {
     });
 
     expect(asTextFile(exported.files["COMPANY.md"])).toContain('name: "Paperclip"');
+    expect(asTextFile(exported.files["COMPANY.md"])).toContain('issuePrefix: "PAP"');
+    expect(asTextFile(exported.files["COMPANY.md"])).toContain('parentIssuePrefix: "PAR"');
     expect(asTextFile(exported.files["COMPANY.md"])).toContain('schema: "agentcompanies/v1"');
     expect(asTextFile(exported.files["agents/claudecoder/AGENTS.md"])).toContain("You are ClaudeCoder.");
     expect(asTextFile(exported.files["agents/claudecoder/AGENTS.md"])).toContain("skills:");
@@ -454,6 +473,8 @@ describe("company portability", () => {
 
     const extension = asTextFile(exported.files[".paperclip.yaml"]);
     expect(extension).toContain('schema: "paperclip/v1"');
+    expect(extension).toContain('issuePrefix: "PAP"');
+    expect(extension).toContain('parentIssuePrefix: "PAR"');
     expect(extension).not.toContain("promptTemplate");
     expect(extension).not.toContain("instructionsFilePath");
     expect(extension).not.toContain("command:");

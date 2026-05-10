@@ -8,6 +8,7 @@ import {
 function company(id: string, name: string): Company {
   return {
     id,
+    parentCompanyId: null,
     name,
     description: null,
     status: "active",
