@@ -30,6 +30,7 @@ const COMPANY_PROJECT_SEEDS = {
   ],
   EBUAAA: [
     ["Upstream Merge and Release Governance", "Track original Paperclip updates, preserve local enterprise customizations, and verify releases before deploy."],
+    ["Dual-Layer Memory Platform", "Operate Hindsight operational memory plus Mem0/local personalization memory for Paperclip agents."],
     ["Knowledge Base and Skills Library", "Maintain company, agent, project, and skill knowledge packages used by the enterprise."],
     ["Dev Test Deployment Infrastructure", "Own CI, build, smoke, regression, Portainer, and recovery evidence for Paperclip deployments."],
   ],

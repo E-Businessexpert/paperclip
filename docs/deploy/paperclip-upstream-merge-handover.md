@@ -48,6 +48,7 @@ git rev-list --left-right --count HEAD...userfork/master
 - Preserve database migration compatibility for previously-applied local migrations when upstream renumbers or replaces migration files.
 - Preserve the live portable export at `C:\Users\savem\Documents\New project\paperclip-live-export` as the restore source for company packages, agent instructions, `.paperclip.yaml` metadata, permissions, service-discovery cache, and relationship links.
 - Preserve the enterprise knowledge/project repair documented in `docs/deploy/enterprise-knowledge-project-restore-2026-05-11.md`; future updates must keep project packages, `CHATROOM.md`, `KNOWLEDGE.md`, and `RELATIONSHIPS.md` aligned with live data.
+- Preserve the Dual Memory implementation documented in `docs/deploy/dual-memory-paperclip-handover-2026-05-11.md`: Hindsight lifecycle payload enrichment, `paperclip.dual-memory` plugin, Mem0-compatible tools, local fallback memory, and Labs governance ownership.
 
 ## Previous Issues And Fixes
 
@@ -96,6 +97,9 @@ pnpm --filter @paperclipai/shared typecheck
 pnpm --filter @paperclipai/db typecheck
 pnpm --filter @paperclipai/server typecheck
 pnpm --filter @paperclipai/ui build
+pnpm --filter @paperclipai/plugin-dual-memory test
+pnpm --filter @paperclipai/plugin-dual-memory typecheck
+pnpm --filter @paperclipai/plugin-dual-memory build
 pnpm exec vitest run --project @paperclipai/ui ui/src/components/Sidebar.test.tsx ui/src/components/SidebarCompanyMenu.test.tsx ui/src/lib/company-routes.test.ts ui/src/pages/FullStructure.test.ts ui/src/pages/FullStructurePage.test.tsx ui/src/pages/FullStructureEnterpriseOrgChart.test.tsx ui/src/pages/AgentChatTR.test.tsx ui/src/pages/AgentDetailEnterprise.test.tsx ui/src/pages/CompanySettings.test.tsx --reporter=verbose
 pnpm --filter @paperclipai/server test -- company-portability
 ```
@@ -113,6 +117,7 @@ Expected route/link behavior:
 - The sidebar does not place the full organization chart inside the `AgentChatTR` section.
 - The full-org chart keeps compact sticky top filters, the company/line color key, mouse-wheel graph zoom, per-node collapse/expand, reset-to-uncollapsed behavior, card-detail toggles, graph fullscreen, and minimized Wiring Inspector.
 - The full-org color key must include Cornerstone and every visible company returned by the family enterprise graph.
+- Dual Memory `memory-self-test` must prove save/search works through the plugin worker; do not accept a UI-only memory check.
 
 Expected live hierarchy data:
 

@@ -582,6 +582,20 @@
       "when": 1778429724633,
       "tag": "0082_company_parent_hierarchy",
       "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1778067785041,
+      "tag": "0083_dry_vision",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1778074536410,
+      "tag": "0084_company_secret_provider_configs",
+      "breakpoints": true
     }
   ]
 }
