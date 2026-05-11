@@ -84,6 +84,12 @@ git rev-list --left-right --count HEAD...userfork/master
   Fix: use explicit package paths for current workspace dependency-cache copies, such as `packages/plugins/sandbox-providers/e2b/package.json`.
 - Issue: local company package knowledge drifted after the upstream merge: missing `EBU`, stale Labs prefix `EBUAAAA`, zero project packages, missing chatrooms, stale `reportsTo: none`, and duplicate agent frontmatter.
   Fix: run `scripts/enterprise/repair-enterprise-knowledge.mjs` with a sanitized live export, normalize Labs to `EBUAAA`, create project packages, create missing `CHATROOM.md`/`KNOWLEDGE.md`/`RELATIONSHIPS.md`, and only normalize stale/duplicate `AGENTS.md` files.
+- Issue: live company data could still be partially present after a merge, giving a false sense that the full org was restored while most agents/projects were missing.
+  Fix: verify API-visible counts against `C:\Users\savem\Documents\New project\paperclip-live-export`; the 2026-05-11 restore ended at 10 companies, 465 agents, 51 projects, and one root agent (`FAM/Family Trust`). See `docs/deploy/enterprise-knowledge-project-restore-2026-05-11.md`.
+- Issue: `EBU` package import failed because its repaired package lacked `.paperclip.yaml`.
+  Fix: restore EBU projects and missing exported agents directly from `PROJECT.md` and `agents/*/{AGENTS,CHATROOM,KNOWLEDGE,RELATIONSHIPS}.md`, then replay reports-to frontmatter into live `agents.reports_to`.
+- Issue: agents can have `adapter_type = process` but no command, causing manual heartbeat failures like `Process adapter missing command`.
+  Fix: before deploy sign-off, query for process adapters with empty `adapter_config.command` and repair by role/name intent (`codex_local`, `gemini_local`, or `claude_local`). Expected count after repair is zero.
 
 ## Validation Checklist
 
@@ -118,6 +124,8 @@ Expected route/link behavior:
 - The full-org chart keeps compact sticky top filters, the company/line color key, mouse-wheel graph zoom, per-node collapse/expand, reset-to-uncollapsed behavior, card-detail toggles, graph fullscreen, and minimized Wiring Inspector.
 - The full-org color key must include Cornerstone and every visible company returned by the family enterprise graph.
 - Dual Memory `memory-self-test` must prove save/search works through the plugin worker; do not accept a UI-only memory check.
+- Dual Memory route checks must pass parameters in the bridge payload as `params`, for example `{ "companyId": "...", "params": { "companyId": "...", "agentId": "..." } }`; top-level values are only used for bridge access scope.
+- Agent adapter verification must include a live DB/API check that no `process` adapter is missing `adapter_config.command`.
 
 Expected live hierarchy data:
 

@@ -99,3 +99,25 @@ AgentChatTR was simplified so agents do not land in a three-frame wall of panels
 - Preserve `CHATROOM.md`, `KNOWLEDGE.md`, and `RELATIONSHIPS.md` as managed agent knowledge files.
 - If Labs prefix appears as `EBUAAAA` in an old export, normalize to live DB prefix `EBUAAA` before import.
 - Do not overwrite existing `CHATROOM.md` content during repair; only create missing files.
+
+## Live Restore Addendum - 2026-05-11
+
+After the upstream merge and Dual Memory deployment, the live database drifted below the repaired enterprise package source:
+
+- Live initially had 10 companies after hierarchy repair, but only 122 agents.
+- The restored source package at `C:\Users\savem\Documents\New project\paperclip-live-export` still contained the full exported enterprise graph.
+- Paperclip portability import restored all valid company packages with `collisionStrategy: replace`, preserving existing extra governance agents while restoring missing agents, projects, permissions, metadata, skills, and managed instruction bundles.
+- `EBU` had no `.paperclip.yaml`, so its missing projects and missing exported agents were restored directly from `PROJECT.md` and agent markdown packages. Existing live `EBU` agents were not deleted.
+- All exported `reportsTo` frontmatter refs were replayed into live `agents.reports_to`; `FAM` was then normalized to `Family Trust -> Family Trust Manager -> Members -> Maryam/Lara/Oussama`.
+- Remaining root/orphan advisors were wired under coherent managers: `EBU` board advisors under `Executive Office President`, `EBUA` board advisors under `CEO Office President`, `EBUA CEO Office President` under `EBUAA Tech Manager President`, and `Dual Memory Steward` under `Paperclip Project Manager`.
+- Agents with `adapter_type = process` and no command were repaired by adapter intent: Codex-named agents to `codex_local`, Gemini-named agents to `gemini_local`, all other missing-command process agents to `claude_local`.
+
+Post-restore live totals:
+
+- Companies: 10.
+- Agents: 465.
+- Projects: 51.
+- Formal reports-to links: 464, with only `FAM/Family Trust` left as the enterprise root.
+- Adapter command gaps: 0 agents with `process` and no command.
+
+Keep this addendum with the upstream merge handover. If a future update shows fewer than these live counts without a deliberate data migration, stop and restore from the export or backup before deploying.
