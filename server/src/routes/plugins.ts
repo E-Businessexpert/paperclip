@@ -140,6 +140,24 @@ interface PluginHealthCheckResult {
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+function getDatabaseErrorCode(error: unknown): unknown {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (typeof current !== "object" || current === null) return undefined;
+    if ("code" in current) {
+      return (current as { code?: unknown }).code;
+    }
+    current = "cause" in current ? (current as { cause?: unknown }).cause : undefined;
+  }
+  return undefined;
+}
+
+function isInvalidUuidLookupError(error: unknown): boolean {
+  if (getDatabaseErrorCode(error) === "22P02") return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("invalid input syntax for type uuid");
+}
+
 const PLUGIN_API_BODY_LIMIT_BYTES = 1_000_000;
 const PLUGIN_SCOPED_API_RESPONSE_HEADER_ALLOWLIST = new Set([
   "cache-control",
@@ -224,12 +242,8 @@ async function resolvePlugin(
     const byId = await registry.getById(pluginId);
     if (byId) return byId;
   } catch (error) {
-    const maybeCode =
-      typeof error === "object" && error !== null && "code" in error
-        ? (error as { code?: unknown }).code
-        : undefined;
     // Ignore invalid UUID cast errors and continue with key lookup.
-    if (maybeCode !== "22P02") {
+    if (!isInvalidUuidLookupError(error)) {
       throw error;
     }
   }
