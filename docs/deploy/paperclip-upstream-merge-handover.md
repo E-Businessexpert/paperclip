@@ -47,6 +47,7 @@ git rev-list --left-right --count HEAD...userfork/master
 - Preserve the agent detail `Agent Permissions` page and dashboard context panels: they must expose relationship workspace editing, cross-company target search, expanded permission toggles, service discovery/software assignments, adapter config, runtime config, and redacted metadata.
 - Preserve database migration compatibility for previously-applied local migrations when upstream renumbers or replaces migration files.
 - Preserve the live portable export at `C:\Users\savem\Documents\New project\paperclip-live-export` as the restore source for company packages, agent instructions, `.paperclip.yaml` metadata, permissions, service-discovery cache, and relationship links.
+- Preserve the enterprise knowledge/project repair documented in `docs/deploy/enterprise-knowledge-project-restore-2026-05-11.md`; future updates must keep project packages, `CHATROOM.md`, `KNOWLEDGE.md`, and `RELATIONSHIPS.md` aligned with live data.
 
 ## Previous Issues And Fixes
 
@@ -80,6 +81,8 @@ git rev-list --left-right --count HEAD...userfork/master
   Fix: if the stack was not updated, deploy through the VM SSH fallback: build the base image from the pushed Git commit on `ubuntu@10.0.15.5`, build the runtime wrapper in `/srv/apps/stacks/paperclip-deploy`, update both `compose.yaml` and `recovery.override.yaml`, then restart with `docker compose`.
 - Issue: the live VM Docker builder does not reliably handle `COPY --parents` wildcard paths.
   Fix: use explicit package paths for current workspace dependency-cache copies, such as `packages/plugins/sandbox-providers/e2b/package.json`.
+- Issue: local company package knowledge drifted after the upstream merge: missing `EBU`, stale Labs prefix `EBUAAAA`, zero project packages, missing chatrooms, stale `reportsTo: none`, and duplicate agent frontmatter.
+  Fix: run `scripts/enterprise/repair-enterprise-knowledge.mjs` with a sanitized live export, normalize Labs to `EBUAAA`, create project packages, create missing `CHATROOM.md`/`KNOWLEDGE.md`/`RELATIONSHIPS.md`, and only normalize stale/duplicate `AGENTS.md` files.
 
 ## Validation Checklist
 

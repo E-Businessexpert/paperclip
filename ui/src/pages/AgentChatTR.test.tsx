@@ -269,7 +269,16 @@ describe("AgentChatTR", () => {
     expect(container.textContent).toContain("Global AgentChatTR");
     expect(container.textContent).toContain("All visible companies");
     expect(container.textContent).toContain("Oussama Ben Rhouma Trust Steward");
+    expect(container.textContent).toContain("Show directory");
+    const directoryButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("Show directory")) as HTMLButtonElement | undefined;
+    expect(directoryButton).toBeTruthy();
+    await act(async () => {
+      directoryButton!.click();
+    });
+    await flushReact();
     expect(container.textContent).toContain("Cornerstone President");
+    expect(container.textContent).toContain("Hide directory");
     expect(container.textContent).toContain("Chat mode");
     expect(container.textContent).toContain("Send to agent");
     expect(container.textContent).toContain("Generated fallback rooms");

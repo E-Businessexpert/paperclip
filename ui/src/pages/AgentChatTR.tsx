@@ -162,6 +162,8 @@ export function AgentChatTR({ scope = "company" }: AgentChatTRProps = {}) {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [activeRoom, setActiveRoom] = useState<string | null>(null);
   const [draftMessage, setDraftMessage] = useState("");
+  const [directoryOpen, setDirectoryOpen] = useState(false);
+  const [contextOpen, setContextOpen] = useState(false);
   const [createdConversations, setCreatedConversations] = useState<Record<string, Issue>>({});
   const isGlobalScope = scope === "global";
   const requestedAgentId = (searchParams.get("agentId") ?? searchParams.get("agent") ?? "").trim() || null;
@@ -593,7 +595,47 @@ export function AgentChatTR({ scope = "company" }: AgentChatTRProps = {}) {
         </div>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[320px,minmax(0,1fr),360px]">
+      <div className="rounded-xl border border-border bg-card px-4 py-3">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">Active agent</div>
+            <div className="mt-1 truncate text-sm font-semibold">
+              {selectedAgent?.name ?? "Select an agent"}
+            </div>
+          </div>
+          <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center lg:max-w-3xl">
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  setDirectoryOpen(true);
+                }}
+                onFocus={() => setDirectoryOpen(true)}
+                placeholder="Search agent, company, or role"
+                className="pl-9"
+              />
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setDirectoryOpen((current) => !current)}
+            >
+              {directoryOpen ? "Hide directory" : "Show directory"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setContextOpen((current) => !current)}
+            >
+              {contextOpen ? "Hide context" : "Show context"}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {directoryOpen ? (
         <section className="rounded-xl border border-border bg-card">
           <div className="border-b border-border px-4 py-3">
             <div className="flex items-center justify-between gap-2">
@@ -667,7 +709,9 @@ export function AgentChatTR({ scope = "company" }: AgentChatTRProps = {}) {
             )}
           </div>
         </section>
+      ) : null}
 
+      <div className={cn("grid gap-6", contextOpen ? "xl:grid-cols-[minmax(0,1fr),360px]" : "xl:grid-cols-1")}>
         <section className="space-y-4">
           {selectedAgent ? (
             <>
@@ -1020,6 +1064,7 @@ export function AgentChatTR({ scope = "company" }: AgentChatTRProps = {}) {
           )}
         </section>
 
+        {contextOpen ? (
         <aside className="space-y-4">
           <div className="rounded-xl border border-border bg-card p-4">
             <div className="flex items-center gap-2 text-sm font-semibold">
@@ -1120,6 +1165,7 @@ export function AgentChatTR({ scope = "company" }: AgentChatTRProps = {}) {
             </div>
           </div>
         </aside>
+        ) : null}
       </div>
     </div>
   );
