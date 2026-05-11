@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowUpRight,
   Building2,
   FileText,
   MessageSquare,
   Search,
+  Send,
   Users,
   Waypoints,
   Workflow,
 } from "lucide-react";
-import type { Company, EnterpriseGraphLink } from "@paperclipai/shared";
+import type { Company, EnterpriseGraphLink, Issue, IssueComment } from "@paperclipai/shared";
 import { agentsApi, type AgentDirectoryEntry } from "@/api/agents";
 import { issuesApi } from "@/api/issues";
 import { AgentIcon } from "@/components/AgentIconPicker";
@@ -20,6 +21,7 @@ import { PageSkeleton } from "@/components/PageSkeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { useBreadcrumbs } from "@/context/BreadcrumbContext";
 import { useCompany } from "@/context/CompanyContext";
 import {
@@ -49,6 +51,64 @@ interface AgentChatroomCard {
   room: string;
   label: string;
   description: string;
+}
+
+const AGENT_CHATTR_TITLE_PREFIX = "[AgentChatTR]";
+
+function buildConversationTitle(agentName: string, room: string) {
+  return `${AGENT_CHATTR_TITLE_PREFIX} ${room} - ${agentName}`;
+}
+
+function buildConversationDescription(params: {
+  agent: WorkspaceAgent;
+  companyName?: string | null;
+  dashboard: string;
+  room: string;
+}) {
+  return [
+    "AgentChatTR live conversation thread.",
+    "",
+    `AgentChatTR-Agent-ID: ${params.agent.id}`,
+    `AgentChatTR-Agent: ${params.agent.name}`,
+    `AgentChatTR-Room: ${params.room}`,
+    `AgentChatTR-Dashboard: ${params.dashboard}`,
+    `AgentChatTR-Company: ${params.companyName ?? params.agent.companyName ?? "Unknown company"}`,
+    "",
+    "Messages in this issue are the durable chat history for this room.",
+  ].join("\n");
+}
+
+function isAgentChatTRConversation(issue: Issue, agent: WorkspaceAgent, room: string) {
+  const description = issue.description ?? "";
+  if (
+    description.includes(`AgentChatTR-Agent-ID: ${agent.id}`) &&
+    description.includes(`AgentChatTR-Room: ${room}`)
+  ) {
+    return true;
+  }
+  return (
+    issue.assigneeAgentId === agent.id &&
+    issue.title.startsWith(AGENT_CHATTR_TITLE_PREFIX) &&
+    issue.title.includes(room)
+  );
+}
+
+function formatChatTimestamp(value: Date | string) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function commentAuthorLabel(comment: IssueComment, selectedAgent: WorkspaceAgent) {
+  if (comment.authorAgentId === selectedAgent.id) return selectedAgent.name;
+  if (comment.authorType === "agent") return "Agent";
+  if (comment.authorType === "system") return "System";
+  return "You";
 }
 
 function findGlobalSeedCompany(companies: Company[], selectedCompany: Company | null) {
@@ -97,8 +157,12 @@ export function AgentChatTR({ scope = "company" }: AgentChatTRProps = {}) {
   const { companies, selectedCompany, selectedCompanyId } = useCompany();
   const { setBreadcrumbs } = useBreadcrumbs();
   const [searchParams, setSearchParams] = useSearchParams();
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [activeRoom, setActiveRoom] = useState<string | null>(null);
+  const [draftMessage, setDraftMessage] = useState("");
+  const [createdConversations, setCreatedConversations] = useState<Record<string, Issue>>({});
   const isGlobalScope = scope === "global";
   const requestedAgentId = (searchParams.get("agentId") ?? searchParams.get("agent") ?? "").trim() || null;
   const globalSeedCompany = useMemo(
@@ -292,17 +356,18 @@ export function AgentChatTR({ scope = "company" }: AgentChatTRProps = {}) {
     enabled: !!selectedAgent && !!selectedAgentCompanyId && !!chatroomPath,
   });
 
+  const assignedIssuesQueryKey =
+    selectedAgent && selectedAgentCompanyId
+      ? ["agentchattr", "issues", selectedAgentCompanyId, selectedAgent.id] as const
+      : ["agentchattr", "issues", "none"] as const;
   const assignedIssuesQuery = useQuery({
-    queryKey:
-      selectedAgent && selectedAgentCompanyId
-        ? ["agentchattr", "issues", selectedAgentCompanyId, selectedAgent.id]
-        : ["agentchattr", "issues", "none"],
+    queryKey: assignedIssuesQueryKey,
     queryFn: async () => {
       if (!selectedAgent || !selectedAgentCompanyId) return [];
       try {
         return await issuesApi.list(selectedAgentCompanyId, {
           assigneeAgentId: selectedAgent.id,
-          limit: 18,
+          limit: 100,
         });
       } catch {
         return [];
@@ -373,6 +438,96 @@ export function AgentChatTR({ scope = "company" }: AgentChatTRProps = {}) {
     }
     return Array.from(rooms.values());
   }, [executiveRoomForSelectedAgent, parsedChatroom?.roomAccess, primaryRoom, relayRoomForSelectedAgent]);
+
+  useEffect(() => {
+    if (!selectedAgent || chatroomCards.length === 0) {
+      setActiveRoom(null);
+      setDraftMessage("");
+      return;
+    }
+    if (!activeRoom || !chatroomCards.some((card) => card.room === activeRoom)) {
+      setActiveRoom(chatroomCards[0]?.room ?? null);
+      setDraftMessage("");
+    }
+  }, [activeRoom, chatroomCards, selectedAgent]);
+
+  const activeRoomCard = useMemo(
+    () => chatroomCards.find((card) => card.room === activeRoom) ?? chatroomCards[0] ?? null,
+    [activeRoom, chatroomCards],
+  );
+  const conversationKey = selectedAgent && activeRoomCard
+    ? `${selectedAgent.id}:${activeRoomCard.room}`
+    : null;
+  const roomConversationIssue = useMemo(() => {
+    if (!selectedAgent || !activeRoomCard || !conversationKey) return null;
+    return (
+      createdConversations[conversationKey] ??
+      assignedIssuesQuery.data?.find((issue) =>
+        isAgentChatTRConversation(issue, selectedAgent, activeRoomCard.room),
+      ) ??
+      null
+    );
+  }, [activeRoomCard, assignedIssuesQuery.data, conversationKey, createdConversations, selectedAgent]);
+
+  const conversationCommentsQuery = useQuery({
+    queryKey: roomConversationIssue
+      ? queryKeys.issues.comments(roomConversationIssue.id)
+      : ["agentchattr", "comments", "none"],
+    queryFn: async () => {
+      if (!roomConversationIssue) return [];
+      try {
+        return await issuesApi.listComments(roomConversationIssue.id, {
+          order: "asc",
+          limit: 100,
+        });
+      } catch {
+        return [];
+      }
+    },
+    enabled: !!roomConversationIssue,
+  });
+
+  const sendMessageMutation = useMutation({
+    mutationFn: async () => {
+      const body = draftMessage.trim();
+      if (!body) throw new Error("Message is required");
+      if (!selectedAgent || !selectedAgentCompanyId || !activeRoomCard) {
+        throw new Error("Select an agent and room before sending a message");
+      }
+
+      const issue =
+        roomConversationIssue ??
+        await issuesApi.create(selectedAgentCompanyId, {
+          title: buildConversationTitle(selectedAgent.name, activeRoomCard.room),
+          description: buildConversationDescription({
+            agent: selectedAgent,
+            companyName: selectedAgent.companyName ?? boardCompany?.name ?? null,
+            dashboard: selectedDashboard,
+            room: activeRoomCard.room,
+          }),
+          assigneeAgentId: selectedAgent.id,
+          priority: "medium",
+          status: "todo",
+          workMode: "standard",
+        });
+      const comment = await issuesApi.addComment(issue.id, body, true);
+      return { issue, comment };
+    },
+    onSuccess: async ({ issue }) => {
+      if (conversationKey) {
+        setCreatedConversations((current) => ({
+          ...current,
+          [conversationKey]: issue,
+        }));
+      }
+      setDraftMessage("");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: assignedIssuesQueryKey }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.issues.comments(issue.id) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.issues.detail(issue.id) }),
+      ]);
+    },
+  });
 
   if (directoryQuery.isLoading && scopedAgents.length === 0) {
     return <PageSkeleton variant="detail" />;
@@ -619,14 +774,14 @@ export function AgentChatTR({ scope = "company" }: AgentChatTRProps = {}) {
                     <div>
                       <div className="flex items-center gap-2 text-sm font-semibold">
                         <MessageSquare className="h-4 w-4 text-muted-foreground" />
-                        Chatrooms
+                        Chat mode
                       </div>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        These are the active AgentChatTR rooms for the selected agent.
+                        Pick a room, read the durable message thread, and send a comment that wakes the assigned agent.
                       </p>
                     </div>
                     <Badge variant="outline">
-                      {chatroomCards.length} chatroom{chatroomCards.length === 1 ? "" : "s"}
+                      {roomConversationIssue ? "Issue-backed room" : "Ready to start"}
                     </Badge>
                   </div>
                   {!chatroomFileQuery.data ? (
@@ -636,9 +791,17 @@ export function AgentChatTR({ scope = "company" }: AgentChatTRProps = {}) {
                   ) : null}
                   <div className="mt-3 grid gap-3 md:grid-cols-3">
                     {chatroomCards.map((card) => (
-                      <div
+                      <button
                         key={card.room}
-                        className="rounded-lg border border-border bg-background p-3"
+                        type="button"
+                        aria-pressed={activeRoomCard?.room === card.room}
+                        onClick={() => setActiveRoom(card.room)}
+                        className={cn(
+                          "rounded-lg border bg-background p-3 text-left transition hover:border-primary/60 hover:bg-accent/40",
+                          activeRoomCard?.room === card.room
+                            ? "border-primary bg-primary/10 ring-1 ring-primary/30"
+                            : "border-border",
+                        )}
                       >
                         <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
                           {card.label}
@@ -649,8 +812,115 @@ export function AgentChatTR({ scope = "company" }: AgentChatTRProps = {}) {
                         <p className="mt-2 text-xs text-muted-foreground">
                           {card.description}
                         </p>
-                      </div>
+                      </button>
                     ))}
+                  </div>
+
+                  <div className="mt-4 overflow-hidden rounded-xl border border-border bg-background">
+                    <div className="flex flex-col gap-3 border-b border-border px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+                      <div>
+                        <div className="flex items-center gap-2 text-sm font-semibold">
+                          <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                          {activeRoomCard?.room ?? "Select a room"}
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {roomConversationIssue
+                            ? `Conversation issue ${roomConversationIssue.identifier ?? roomConversationIssue.id}`
+                            : "No messages yet. Your first send will create the conversation issue for this room."}
+                        </p>
+                      </div>
+                      {roomConversationIssue ? (
+                        <Button variant="outline" size="sm" asChild>
+                          <Link to={issueUrl(roomConversationIssue)}>
+                            Open issue
+                            <ArrowUpRight className="ml-1 h-4 w-4" />
+                          </Link>
+                        </Button>
+                      ) : null}
+                    </div>
+
+                    <div className="max-h-[420px] min-h-[240px] space-y-3 overflow-y-auto px-4 py-4">
+                      {!roomConversationIssue ? (
+                        <div className="flex h-48 items-center justify-center rounded-lg border border-dashed border-border text-center">
+                          <div>
+                            <div className="text-sm font-medium">Start talking in this room</div>
+                            <p className="mt-1 max-w-md text-xs text-muted-foreground">
+                              Type a message below. Paperclip will create an AgentChatTR conversation issue, assign it to {selectedAgent.name}, and store this room's chat history there.
+                            </p>
+                          </div>
+                        </div>
+                      ) : conversationCommentsQuery.isLoading ? (
+                        <div className="text-sm text-muted-foreground">Loading room messages...</div>
+                      ) : conversationCommentsQuery.data?.length ? (
+                        conversationCommentsQuery.data.map((comment) => {
+                          const isSelectedAgent = comment.authorAgentId === selectedAgent.id;
+                          const authorLabel = commentAuthorLabel(comment, selectedAgent);
+                          return (
+                            <div
+                              key={comment.id}
+                              className={cn("flex", isSelectedAgent ? "justify-start" : "justify-end")}
+                            >
+                              <div
+                                className={cn(
+                                  "max-w-[82%] rounded-2xl border px-4 py-3 text-sm shadow-sm",
+                                  isSelectedAgent
+                                    ? "border-border bg-card"
+                                    : "border-primary/30 bg-primary/10",
+                                )}
+                              >
+                                <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[11px] uppercase tracking-wide text-muted-foreground">
+                                  <span>{authorLabel}</span>
+                                  <span>{formatChatTimestamp(comment.createdAt)}</span>
+                                </div>
+                                <MarkdownBody children={comment.body} />
+                              </div>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div className="flex h-48 items-center justify-center rounded-lg border border-dashed border-border text-center">
+                          <div>
+                            <div className="text-sm font-medium">No messages in this room yet</div>
+                            <p className="mt-1 max-w-md text-xs text-muted-foreground">
+                              Send the first message below to wake {selectedAgent.name}.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <form
+                      className="border-t border-border p-4"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        if (!draftMessage.trim() || sendMessageMutation.isPending) return;
+                        sendMessageMutation.mutate();
+                      }}
+                    >
+                      <Textarea
+                        value={draftMessage}
+                        onChange={(event) => setDraftMessage(event.target.value)}
+                        placeholder={`Message ${selectedAgent.name} in ${activeRoomCard?.room ?? "this room"}`}
+                        className="min-h-24 resize-y"
+                      />
+                      {sendMessageMutation.error instanceof Error ? (
+                        <div className="mt-2 text-sm text-destructive">
+                          {sendMessageMutation.error.message}
+                        </div>
+                      ) : null}
+                      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <p className="text-xs text-muted-foreground">
+                          Sends as an issue comment and wakes the assigned agent through the existing Paperclip flow.
+                        </p>
+                        <Button
+                          type="submit"
+                          disabled={!draftMessage.trim() || sendMessageMutation.isPending || !activeRoomCard}
+                        >
+                          <Send className="mr-2 h-4 w-4" />
+                          {sendMessageMutation.isPending ? "Sending..." : "Send to agent"}
+                        </Button>
+                      </div>
+                    </form>
                   </div>
                 </div>
               </div>

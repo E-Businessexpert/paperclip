@@ -18,6 +18,9 @@ const mockAgentsApi = vi.hoisted(() => ({
 
 const mockIssuesApi = vi.hoisted(() => ({
   list: vi.fn(),
+  create: vi.fn(),
+  addComment: vi.fn(),
+  listComments: vi.fn(),
 }));
 
 const mockSetBreadcrumbs = vi.hoisted(() => vi.fn());
@@ -137,6 +140,15 @@ async function flushReact() {
   });
 }
 
+function changeTextarea(textarea: HTMLTextAreaElement, value: string) {
+  const valueSetter = Object.getOwnPropertyDescriptor(
+    window.HTMLTextAreaElement.prototype,
+    "value",
+  )?.set;
+  valueSetter?.call(textarea, value);
+  textarea.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 describe("AgentChatTR", () => {
   let container: HTMLDivElement;
 
@@ -215,6 +227,33 @@ describe("AgentChatTR", () => {
     mockAgentsApi.instructionsBundle.mockResolvedValue(null);
     mockAgentsApi.instructionsFile.mockResolvedValue(null);
     mockIssuesApi.list.mockResolvedValue([]);
+    mockIssuesApi.create.mockResolvedValue({
+      id: "conversation-issue-id",
+      companyId: "cor-id",
+      title: "[AgentChatTR] #cornerstone-holding-executive - Cornerstone President",
+      description: "AgentChatTR-Agent-ID: cornerstone-president\nAgentChatTR-Room: #cornerstone-holding-executive",
+      status: "todo",
+      priority: "medium",
+      assigneeAgentId: "cornerstone-president",
+      assigneeUserId: null,
+      identifier: "COR-99",
+      createdAt: new Date("2026-05-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-05-01T00:00:00.000Z"),
+    });
+    mockIssuesApi.addComment.mockResolvedValue({
+      id: "comment-id",
+      companyId: "cor-id",
+      issueId: "conversation-issue-id",
+      authorType: "user",
+      authorAgentId: null,
+      authorUserId: "user-id",
+      body: "Hello agent",
+      presentation: null,
+      metadata: null,
+      createdAt: new Date("2026-05-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-05-01T00:00:00.000Z"),
+    });
+    mockIssuesApi.listComments.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -231,7 +270,8 @@ describe("AgentChatTR", () => {
     expect(container.textContent).toContain("All visible companies");
     expect(container.textContent).toContain("Oussama Ben Rhouma Trust Steward");
     expect(container.textContent).toContain("Cornerstone President");
-    expect(container.textContent).toContain("Chatrooms");
+    expect(container.textContent).toContain("Chat mode");
+    expect(container.textContent).toContain("Send to agent");
     expect(container.textContent).toContain("Generated fallback rooms");
     expect(container.textContent).toContain("#family-trust-executive");
     expect(container.querySelector('a[href="/FAM/agents/oussama-ben-rhouma-trust-steward"]')).toBeTruthy();
@@ -253,6 +293,44 @@ describe("AgentChatTR", () => {
     );
     expect(container.textContent).toContain("#cornerstone-holding-executive");
     expect(container.textContent).toContain("#cornerstone-holding-relay");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("sends chat messages through an issue-backed AgentChatTR room", async () => {
+    const root = await renderAgentChatTR("company");
+
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement | null;
+    expect(textarea).toBeTruthy();
+
+    await act(async () => {
+      changeTextarea(textarea!, "Hello agent");
+    });
+    await flushReact();
+
+    const sendButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("Send to agent")) as HTMLButtonElement | undefined;
+    expect(sendButton).toBeTruthy();
+
+    await act(async () => {
+      sendButton!.click();
+    });
+    await flushReact();
+
+    expect(mockIssuesApi.create).toHaveBeenCalledWith(
+      "cor-id",
+      expect.objectContaining({
+        assigneeAgentId: "cornerstone-president",
+        title: expect.stringContaining("[AgentChatTR]"),
+      }),
+    );
+    expect(mockIssuesApi.addComment).toHaveBeenCalledWith(
+      "conversation-issue-id",
+      "Hello agent",
+      true,
+    );
 
     await act(async () => {
       root.unmount();
